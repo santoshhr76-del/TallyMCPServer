@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.DS_Store
+*.log
+
+# Large Tally XML exports — exceed GitHub's 100 MB file size limit
+receivables-dashboard/masters_all.xml
+receivables-dashboard/output/receivables_fetch.tmp
+receivables-dashboard/output/receivables_temp.json

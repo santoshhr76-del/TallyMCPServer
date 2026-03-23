@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Receivables -- Geographic Distribution</title>
+
+  <!-- Leaflet 1.9.4 CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      font-family: 'Segoe UI', Arial, sans-serif;
+    }
+
+    #map {
+      width: 100%;
+      height: 100vh;
+    }
+
+    /* Title control box */
+    .map-title-box {
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 10px 16px;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1a1a2e;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      pointer-events: none;
+      line-height: 1.4;
+    }
+
+    .map-title-box .subtitle {
+      font-size: 0.72rem;
+      font-weight: 400;
+      color: #555;
+      margin-top: 2px;
+    }
+
+    /* Legend */
+    .legend-box {
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 0.78rem;
+      color: #333;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+      min-width: 195px;
+    }
+
+    .legend-box h4 {
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #111;
+      margin-bottom: 8px;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .legend-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      border: 1px solid rgba(0,0,0,0.25);
+    }
+
+    .legend-divider {
+      border: none;
+      border-top: 1px solid #ddd;
+      margin: 8px 0;
+    }
+
+    /* Missing coords panel */
+    .missing-panel {
+      background: rgba(255, 253, 235, 0.97);
+      border: 1px solid #f0c040;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.74rem;
+      color: #555;
+      max-width: 280px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+
+    .missing-panel h5 {
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #b45309;
+      margin-bottom: 5px;
+    }
+
+    .missing-panel ul {
+      list-style: disc;
+      padding-left: 16px;
+    }
+
+    .missing-panel li {
+      margin-bottom: 2px;
+    }
+
+    /* Popup overrides */
+    .leaflet-popup-content {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      min-width: 210px;
+    }
+
+    .popup-name {
+      font-weight: 700;
+      font-size: 0.9rem;
+      color: #1a1a2e;
+      margin-bottom: 4px;
+    }
+
+    .popup-amount {
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: #15803d;
+      margin-bottom: 4px;
+    }
+
+    .popup-row {
+      color: #444;
+      margin-top: 2px;
+    }
+
+    .popup-label {
+      color: #777;
+      font-size: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- Leaflet 1.9.4 JS -->
+<script
+  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WPaU="
+  crossorigin=""></script>
+
+<script>
+// ============================================================
+// Embedded map data  (source: output/map_data.json)
+// Geocoded via Nominatim OSM; place names from hardcoded
+// Udaipur-region lookup dict.
+// Pincodes 313005 and 313025 returned no Nominatim result;
+// coordinates fall back to Udaipur city centre (24.5937, 73.6855).
+// ============================================================
+var MAP_DATA = {
+  "generated_at": "2026-03-22T00:00:00",
+  "party_count": 25,
+  "note": "Geocoded via Nominatim; place names from hardcoded Udaipur lookup",
+  "pincode_labels": {
+    "313001": "Pratapnagar",
+    "313002": "H Magri",
+    "313003": "Girwa",
+    "313004": "Udaipur City",
+    "313005": "Udaipur City",
+    "313011": "Badgaon",
+    "313024": "Debari",
+    "313025": "Bari",
+    "313027": "Salumber",
+    "313031": "Sisarma",
+    "313705": "Gogunda",
+    "313803": "Kherwara",
+    "313903": "Kalyanpur"
+  },
+  "parties": [
+    {
+      "name": "ANGAD RESTORENT BALICHA",
+      "pincode": "313001",
+      "state": "Rajasthan",
+      "lat": 24.585784,
+      "lng": 73.709223,
+      "outstanding": 5587.0,
+      "max_days_overdue": 92,
+      "address": "Sec 6, Udaipur",
+      "place_name": "Pratapnagar"
+    },
+    {
+      "name": "BAJRANG DUDH DAIRY & GEN (RK PURAM)",
+      "pincode": "313002",
+      "state": "Rajasthan",
+      "lat": 24.560026,
+      "lng": 73.708160,
+      "outstanding": 14827.0,
+      "max_days_overdue": 80,
+      "address": "Hospital Road",
+      "place_name": "H Magri"
+    },
+    {
+      "name": "BIKANER PRO. STORE RK PURAM",
+      "pincode": "313003",
+      "state": "Rajasthan",
+      "lat": 24.587011,
+      "lng": 73.781289,
+      "outstanding": 836.0,
+      "max_days_overdue": 73,
+      "address": "SAVINA CIRCLE SEC 9",
+      "place_name": "Girwa"
+    },
+    {
+      "name": "FRIENDS ICE CREAM (UMARDA)",
+      "pincode": "313004",
+      "state": "Rajasthan",
+      "lat": 24.595508,
+      "lng": 73.691101,
+      "outstanding": 12866.0,
+      "max_days_overdue": 73,
+      "address": "MANVA KHEDA",
+      "place_name": "Udaipur City"
+    },
+    {
+      "name": "HEALTH CARE PHARMACY-Sect-3",
+      "pincode": "313011",
+      "state": "Rajasthan",
+      "lat": 24.663236,
+      "lng": 73.641145,
+      "outstanding": 6512.0,
+      "max_days_overdue": 78,
+      "address": "Nr Jayesh Mishthan",
+      "place_name": "Badgaon"
+    },
+    {
+      "name": "JAI AMBAY JODHPUR SWEETS & BAKERY [2334955]",
+      "pincode": "313024",
+      "state": "Rajasthan",
+      "lat": 24.727643,
+      "lng": 73.659931,
+      "outstanding": 8876.0,
+      "max_days_overdue": 94,
+      "address": "",
+      "place_name": "Debari"
+    },
+    {
+      "name": "JAI MEWAR JUICE SEC 6",
+      "pincode": "313031",
+      "state": "Rajasthan",
+      "lat": 24.448359,
+      "lng": 73.557012,
+      "outstanding": 6844.0,
+      "max_days_overdue": 72,
+      "address": "KHUSHBOO UPB KE PASS",
+      "place_name": "Sisarma"
+    },
+    {
+      "name": "JAY BHERAV DERY-Sect-11",
+      "pincode": "313002",
+      "state": "Rajasthan",
+      "lat": 24.560026,
+      "lng": 73.708160,
+      "outstanding": 1614.0,
+      "max_days_overdue": 101,
+      "address": "nr alok school, Udaipur",
+      "place_name": "H Magri"
+    },
+    {
+      "name": "JMB DAIRY (SAVINA)",
+      "pincode": "313803",
+      "state": "Rajasthan",
+      "lat": 24.022356,
+      "lng": 73.558720,
+      "outstanding": 4547.0,
+      "max_days_overdue": 91,
+      "address": "",
+      "place_name": "Kherwara"
+    },
+    {
+      "name": "KAMAKSHI STORE TITARDI",
+      "pincode": "313001",
+      "state": "Rajasthan",
+      "lat": 24.585784,
+      "lng": 73.709223,
+      "outstanding": 3715.0,
+      "max_days_overdue": 70,
+      "address": "AMBAMATA GHATI",
+      "place_name": "Pratapnagar"
+    },
+    {
+      "name": "KRISHNA DAIRY SEC 3",
+      "pincode": "313001",
+      "state": "Rajasthan",
+      "lat": 24.585784,
+      "lng": 73.709223,
+      "outstanding": 13136.0,
+      "max_days_overdue": 29,
+      "address": "PANAKJ UPBHOKTA K PASS",
+      "place_name": "Pratapnagar"
+    },
+    {
+      "name": "KRISHNA DUDH DAIRY 14",
+      "pincode": "313001",
+      "state": "Rajasthan",
+      "lat": 24.585784,
+      "lng": 73.709223,
+      "outstanding": 4025.0,
+      "max_days_overdue": 16,
+      "address": "92, near Miraz Morning, L-Block, Sector 14, Shastri Nagar, Udaipur",
+      "place_name": "Pratapnagar"
+    },
+    {
+      "name": "MAHAVEER KIRANA STOREA",
+      "pincode": "313903",
+      "state": "Rajasthan",
+      "lat": 24.023836,
+      "lng": 73.826257,
+      "outstanding": 2446.0,
+      "max_days_overdue": 103,
+      "address": "SEC,14",
+      "place_name": "Kalyanpur"
+    },
+    {
+      "name": "MANOJ KIRANA SEC 14",
+      "pincode": "313027",
+      "state": "Rajasthan",
+      "lat": 24.150662,
+      "lng": 74.041489,
+      "outstanding": 10459.0,
+      "max_days_overdue": 113,
+      "address": "Main Road Navkar K Samne, Sec-14",
+      "place_name": "Salumber"
+    },
+    {
+      "name": "MAYANK TRADERS SEC-4",
+      "pincode": "313705",
+      "state": "Rajasthan",
+      "lat": 24.725439,
+      "lng": 73.465190,
+      "outstanding": 13932.0,
+      "max_days_overdue": 112,
+      "address": "HEMANT K PASS GALI ME",
+      "place_name": "Gogunda"
+    },
+    {
+      "name": "Mahalaxmi Misthan Bhandar(Sec.5)",
+      "pincode": "313001",
+      "state": "Rajasthan",
+      "lat": 24.585784,
+      "lng": 73.709223,
+      "outstanding": 8507.0,
+      "max_days_overdue": 101,
+      "address": "Manwa Kheda",
+      "place_name": "Pratapnagar"
+    },
+    {
+      "name": "NEW BHERUNATH DUTH DAIRY",
+      "pincode": "313005",
+      "state": "Rajasthan",
+      "lat": 24.593700,
+      "lng": 73.685500,
+      "outstanding": 3841.0,
+      "max_days_overdue": 110,
+      "address": "KESHAV NAGAR",
+      "place_name": "Udaipur City"
+    },
+    {
+      "name": "OM KIRANA SEC 14",
+      "pincode": "313011",
+      "state": "Rajasthan",
+      "lat": 24.663236,
+      "lng": 73.641145,
+      "outstanding": 307.0,
+      "max_days_overdue": 58,
+      "address": "AAYAD",
+      "place_name": "Badgaon"
+    },
+    {
+      "name": "PATEL DUDH DAIRY & KIRANA (EKLINGPURA)",
+      "pincode": "313024",
+      "state": "Rajasthan",
+      "lat": 24.727643,
+      "lng": 73.659931,
+      "outstanding": 3964.0,
+      "max_days_overdue": 48,
+      "address": "LAXMI MISHTAN BHANDAR",
+      "place_name": "Debari"
+    },
+    {
+      "name": "RAJLAXMI BAKERY(SEC.14)",
+      "pincode": "313011",
+      "state": "Rajasthan",
+      "lat": 24.663236,
+      "lng": 73.641145,
+      "outstanding": 2627.0,
+      "max_days_overdue": 75,
+      "address": "NEAR BVR SUPERMARKET",
+      "place_name": "Badgaon"
+    },
+    {
+      "name": "RAMA MEDICAL STORESEC-14",
+      "pincode": "313003",
+      "state": "Rajasthan",
+      "lat": 24.587011,
+      "lng": 73.781289,
+      "outstanding": 6060.0,
+      "max_days_overdue": 90,
+      "address": "SEC.14",
+      "place_name": "Girwa"
+    },
+    {
+      "name": "SAI BAKERS SEC 5",
+      "pincode": "313024",
+      "state": "Rajasthan",
+      "lat": 24.727643,
+      "lng": 73.659931,
+      "outstanding": 488.0,
+      "max_days_overdue": 57,
+      "address": "NEAR VISHAL UPBHOKTA",
+      "place_name": "Debari"
+    },
+    {
+      "name": "SALES RETURN - GST [SRGST-12]",
+      "pincode": "",
+      "state": "",
+      "lat": null,
+      "lng": null,
+      "outstanding": 2749.96,
+      "max_days_overdue": 40,
+      "address": "",
+      "place_name": ""
+    },
+    {
+      "name": "SK PROVISION STORE SEC 11",
+      "pincode": "313025",
+      "state": "Rajasthan",
+      "lat": 24.593700,
+      "lng": 73.685500,
+      "outstanding": 1309.0,
+      "max_days_overdue": 83,
+      "address": "SEC 11, UDAIPUR",
+      "place_name": "Bari"
+    },
+    {
+      "name": "VARSHA RESTAURANT(Titardi)",
+      "pincode": "313001",
+      "state": "Rajasthan",
+      "lat": 24.585784,
+      "lng": 73.709223,
+      "outstanding": 227.0,
+      "max_days_overdue": 84,
+      "address": "Near Shreenath Traders",
+      "place_name": "Pratapnagar"
+    }
+  ]
+};
+
+// ============================================================
+// Helpers
+// ============================================================
+
+/**
+ * Format a number in Indian comma notation: Rs 1,23,456
+ */
+function formatINR(amount) {
+  var num = Math.round(amount);
+  var s   = num.toString();
+  if (s.length <= 3) return 'Rs\u00a0' + s;
+  var last3  = s.slice(-3);
+  var rest   = s.slice(0, -3);
+  var groups = [];
+  var i      = rest.length;
+  while (i > 0) {
+    groups.unshift(rest.slice(Math.max(0, i - 2), i));
+    i -= 2;
+  }
+  return 'Rs\u00a0' + groups.join(',') + ',' + last3;
+}
+
+/**
+ * Circle radius proportional to outstanding amount.
+ * Scaled so min=8, max=30 pixels across the full data range.
+ */
+var allOutstanding = MAP_DATA.parties
+  .filter(function(p) { return p.lat !== null; })
+  .map(function(p)    { return p.outstanding;  });
+
+var minOut = Math.min.apply(null, allOutstanding);
+var maxOut = Math.max.apply(null, allOutstanding);
+
+function getRadius(outstanding) {
+  if (maxOut === minOut) return 15;
+  var norm = (outstanding - minOut) / (maxOut - minOut);
+  return Math.round(8 + norm * (30 - 8));
+}
+
+/**
+ * Marker fill colour based on max_days_overdue:
+ *   > 90 days  -> red
+ *   > 30 days  -> orange
+ *   otherwise  -> green
+ */
+function getColor(days) {
+  if (days > 90) return '#ef4444';
+  if (days > 30) return '#f97316';
+  return '#22c55e';
+}
+
+function getBorderColor(days) {
+  if (days > 90) return '#b91c1c';
+  if (days > 30) return '#c2410c';
+  return '#15803d';
+}
+
+// ============================================================
+// Initialise Leaflet map -- centred on Udaipur
+// ============================================================
+var map = L.map('map', {
+  center: [24.5937, 73.6855],
+  zoom: 12
+});
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  maxZoom: 19
+}).addTo(map);
+
+// ============================================================
+// Title control (top-left)
+// ============================================================
+var TitleControl = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd: function() {
+    var div = L.DomUtil.create('div', 'map-title-box');
+    div.innerHTML =
+      '<div>Receivables \u2014 Geographic Distribution</div>'
+      + '<div class="subtitle">Udaipur Region &nbsp;&bull;&nbsp; Rajasthan, India'
+      + '<br>Generated: 2026-03-22 &nbsp;&bull;&nbsp; '
+      + MAP_DATA.party_count + ' parties</div>';
+    return div;
+  }
+});
+new TitleControl().addTo(map);
+
+// ============================================================
+// Partition parties into plotted vs missing
+// ============================================================
+var plotted = [];
+var missing = [];
+
+MAP_DATA.parties.forEach(function(party) {
+  if (party.lat !== null && party.lng !== null) {
+    plotted.push(party);
+  } else {
+    missing.push(party);
+  }
+});
+
+// ============================================================
+// Plot circle markers
+// ============================================================
+plotted.forEach(function(party) {
+  var days   = party.max_days_overdue || 0;
+  var radius = getRadius(party.outstanding);
+  var fill   = getColor(days);
+  var border = getBorderColor(days);
+
+  var circle = L.circleMarker([party.lat, party.lng], {
+    radius:      radius,
+    fillColor:   fill,
+    color:       border,
+    weight:      1.5,
+    opacity:     0.9,
+    fillOpacity: 0.60
+  }).addTo(map);
+
+  // -- Tooltip shown on hover --
+  var ttip =
+    '<strong>' + party.name + '</strong><br>'
+    + formatINR(party.outstanding)
+    + '<br>PIN ' + (party.pincode || 'N/A')
+    + (party.place_name ? ' \u2014 ' + party.place_name : '');
+  circle.bindTooltip(ttip, { sticky: true });
+
+  // -- Popup shown on click --
+  var addrLine = party.address
+    ? '<div class="popup-row"><span class="popup-label">Address: </span>' + party.address + '</div>'
+    : '';
+  var pinLine = party.pincode
+    ? '<div class="popup-row"><span class="popup-label">PIN: </span>'
+        + party.pincode
+        + (party.place_name ? ' \u2014 ' + party.place_name : '')
+        + '</div>'
+    : '';
+  var stateLine = (party.state && party.state !== '0')
+    ? '<div class="popup-row"><span class="popup-label">State: </span>' + party.state + '</div>'
+    : '';
+  var daysLine =
+    '<div class="popup-row"><span class="popup-label">Max days overdue: </span>'
+    + party.max_days_overdue + '</div>';
+
+  var html =
+    '<div class="popup-name">' + party.name + '</div>'
+    + '<div class="popup-amount">' + formatINR(party.outstanding) + '</div>'
+    + addrLine
+    + pinLine
+    + stateLine
+    + daysLine;
+
+  circle.bindPopup(html);
+});
+
+// ============================================================
+// Missing-coordinates panel (bottom-left, shown only if needed)
+// ============================================================
+if (missing.length > 0) {
+  var MissingControl = L.Control.extend({
+    options: { position: 'bottomleft' },
+    onAdd: function() {
+      var div  = L.DomUtil.create('div', 'missing-panel');
+      var list = missing.map(function(p) {
+        return '<li>' + p.name
+          + (p.pincode ? ' (' + p.pincode + ')' : ' \u2014 no PIN')
+          + '</li>';
+      }).join('');
+      div.innerHTML =
+        '<h5>Parties without coordinates (' + missing.length + ')</h5>'
+        + '<ul>' + list + '</ul>';
+      return div;
+    }
+  });
+  new MissingControl().addTo(map);
+}
+
+// ============================================================
+// Legend (bottom-right)
+// ============================================================
+var LegendControl = L.Control.extend({
+  options: { position: 'bottomright' },
+  onAdd: function() {
+    var div = L.DomUtil.create('div', 'legend-box');
+    div.innerHTML =
+      '<h4>Days Overdue</h4>'
+      + '<div class="legend-row">'
+      +   '<div class="legend-dot" style="background:#22c55e;border-color:#15803d;"></div>'
+      +   '<span>0 &ndash; 30 days (green)</span>'
+      + '</div>'
+      + '<div class="legend-row">'
+      +   '<div class="legend-dot" style="background:#f97316;border-color:#c2410c;"></div>'
+      +   '<span>31 &ndash; 90 days (orange)</span>'
+      + '</div>'
+      + '<div class="legend-row">'
+      +   '<div class="legend-dot" style="background:#ef4444;border-color:#b91c1c;"></div>'
+      +   '<span>&gt; 90 days (red)</span>'
+      + '</div>'
+      + '<hr class="legend-divider">'
+      + '<h4>Marker Size</h4>'
+      + '<div style="font-size:0.73rem;color:#555;line-height:1.5;">'
+      +   'Proportional to outstanding<br>'
+      +   'amount (8 &ndash; 30 px radius)'
+      + '</div>'
+      + '<hr class="legend-divider">'
+      + '<div style="font-size:0.7rem;color:#888;">'
+      +   'Hover for summary &bull; click for details'
+      + '</div>';
+    return div;
+  }
+});
+new LegendControl().addTo(map);
+
+// ============================================================
+// Summary to browser console
+// ============================================================
+console.log('[OK] Map created -- ' + plotted.length + ' parties plotted, ' + missing.length + ' missing coordinates');
+</script>
+</body>
+</html>

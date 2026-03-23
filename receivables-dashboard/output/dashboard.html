@@ -1,0 +1,1510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Receivables Dashboard — Udaipur Region</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --navy: #0d1b2a;
+    --blue: #1a56db;
+    --green: #0e9f6e;
+    --amber: #f59e0b;
+    --red1: #ff5a1f;
+    --red2: #e02424;
+    --red3: #7f1d1d;
+    --bg: #f1f5f9;
+    --surface: #ffffff;
+    --border: #e2e8f0;
+    --text: #1e293b;
+    --muted: #64748b;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* NAVBAR */
+  .navbar {
+    background: var(--navy);
+    padding: 0 28px;
+    height: 58px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+  }
+  .navbar-logo {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #1a56db, #0e9f6e);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 13px; color: #fff;
+    letter-spacing: -0.5px; flex-shrink: 0;
+  }
+  .navbar-title {
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    flex: 1;
+  }
+  .navbar-date {
+    color: #94a3b8;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* LAYOUT */
+  .container { max-width: 1200px; margin: 0 auto; padding: 28px 20px; }
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--muted);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+  .section { margin-bottom: 36px; }
+
+  /* KPI CARDS */
+  .kpi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .kpi-card {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 18px 24px 16px;
+    border: 1.5px solid var(--border);
+    position: relative;
+    overflow: hidden;
+    display: flex; flex-direction: column; align-items: center;
+    text-align: center;
+    transition: box-shadow 0.2s, transform 0.2s;
+  }
+  .kpi-card:hover { box-shadow: 0 4px 24px rgba(0,0,0,0.09); transform: translateY(-1px); }
+  .kpi-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 4px;
+    border-radius: 14px 0 0 14px;
+  }
+  .kpi-card.blue::before { background: var(--blue); }
+  .kpi-card.green::before { background: var(--green); }
+  .kpi-card.clickable { cursor: pointer; }
+  .kpi-card.clickable:hover {
+    box-shadow: 0 0 0 2px var(--green), 0 4px 24px rgba(0,0,0,0.09);
+    transform: translateY(-1px);
+  }
+  .kpi-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .kpi-value {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--text);
+    margin-bottom: 3px;
+    line-height: 1.1;
+  }
+  .kpi-card.blue .kpi-value { color: var(--blue); }
+  .kpi-card.green .kpi-value { color: var(--green); }
+  .kpi-sub { font-size: 12px; color: var(--muted); }
+  .kpi-icon {
+    position: absolute;
+    right: 16px; top: 50%;
+    transform: translateY(-50%);
+    width: 54px; height: 54px;
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; font-weight: 700;
+  }
+  .kpi-card.blue  .kpi-icon { background: rgba(26,86,219,0.10);  color: var(--blue); }
+  .kpi-card.green .kpi-icon { background: rgba(14,159,110,0.10); color: var(--green); }
+
+  /* AGING SECTION */
+  .aging-layout { display: grid; grid-template-columns: 1fr 340px; gap: 20px; align-items: start; }
+  .chart-card {
+    background: var(--surface);
+    border-radius: 14px;
+    border: 1.5px solid var(--border);
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  }
+  .chart-header {
+    background: linear-gradient(120deg, #0d1b2a 0%, #1a3a5c 60%, #1a56db 100%);
+    padding: 18px 22px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .chart-header::after {
+    content: '';
+    position: absolute;
+    right: -40px; top: -40px;
+    width: 140px; height: 140px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.05);
+    pointer-events: none;
+  }
+  .chart-header-left .ch-muted {
+    font-size: 10px; color: rgba(255,255,255,0.5);
+    text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;
+  }
+  .chart-header-left .ch-title { font-size: 15px; font-weight: 700; color: #fff; }
+  .chart-header-right { text-align: right; }
+  .chart-header-right .ch-muted {
+    font-size: 10px; color: rgba(255,255,255,0.5);
+    text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;
+  }
+  .chart-header-right .ch-total { font-size: 18px; font-weight: 800; color: #fff; }
+  .chart-body { padding: 20px; }
+  .chart-wrapper { position: relative; height: 300px; }
+
+  /* TOP 5 */
+  .top5-card {
+    background: var(--surface);
+    border-radius: 14px;
+    border: 1.5px solid var(--border);
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  }
+  .top5-header {
+    padding: 14px 18px 12px;
+    background: linear-gradient(135deg, #1e3a5f 0%, #1a56db 100%);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .top5-header-left {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .top5-header-left svg { opacity: 0.9; }
+  .top5-header span.top5-title {
+    font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.9px; color: rgba(255,255,255,0.9);
+  }
+  .top5-badge {
+    font-size: 10px; background: rgba(255,255,255,0.18); color: #fff;
+    padding: 3px 10px; border-radius: 20px; font-weight: 600; letter-spacing: 0.2px;
+  }
+  .top5-list { padding: 4px 0; }
+  .top5-item {
+    display: flex;
+    align-items: center;
+    padding: 11px 18px;
+    gap: 13px;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background 0.15s;
+    position: relative;
+  }
+  .top5-item:last-child { border-bottom: none; }
+  .top5-item:hover { background: #f0f6ff; }
+  /* Rank medal badges */
+  .top5-rank {
+    width: 28px; height: 28px; border-radius: 50%;
+    color: #fff; font-size: 11px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+  }
+  .rank-1 { background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 2px 8px rgba(245,158,11,0.45); }
+  .rank-2 { background: linear-gradient(135deg, #94a3b8, #64748b); box-shadow: 0 2px 8px rgba(100,116,139,0.40); }
+  .rank-3 { background: linear-gradient(135deg, #cd7c3e, #a85c28); box-shadow: 0 2px 8px rgba(171,98,46,0.40); }
+  .rank-4, .rank-5 { background: linear-gradient(135deg, #3b82f6, #1a56db); }
+  .top5-info { flex: 1; min-width: 0; }
+  .top5-name {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .top5-bills { font-size: 10px; color: var(--muted); margin-top: 1px; }
+  .top5-right { text-align: right; flex-shrink: 0; min-width: 90px; }
+  .top5-amt { font-size: 14px; font-weight: 800; color: var(--blue); white-space: nowrap; }
+  .top5-pct { font-size: 10px; color: var(--muted); margin-top: 1px; }
+  .top5-bar-track { height: 5px; background: #e2e8f0; border-radius: 3px; margin-top: 7px; }
+  .top5-bar-fill {
+    height: 5px; border-radius: 3px;
+    background: linear-gradient(90deg, #1a56db 0%, #0e9f6e 100%);
+    box-shadow: 0 1px 4px rgba(26,86,219,0.25);
+  }
+
+  /* PROJECTION CARDS */
+  .proj-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .proj-card {
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1.5px solid var(--border);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  }
+  .proj-header {
+    padding: 16px 22px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    position: relative; overflow: hidden;
+  }
+  .curr-card .proj-header { background: linear-gradient(120deg, #1a56db, #2563eb, #3b82f6); }
+  .next-card .proj-header { background: linear-gradient(120deg, #7c3aed, #8b5cf6, #a78bfa); }
+  .proj-header-icon {
+    position: absolute; right: 18px; top: 50%; transform: translateY(-50%);
+    opacity: 0.90;
+  }
+  .proj-header-text .ph-title {
+    font-size: 13px; font-weight: 700; text-transform: uppercase;
+    color: rgba(255,255,255,0.85); letter-spacing: 1px; margin-bottom: 5px;
+  }
+  .proj-header-text .ph-range { font-size: 16px; font-weight: 700; color: #fff; }
+  .proj-body { background: var(--surface); }
+  .proj-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 9px 20px;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .proj-row:last-child {
+    border-bottom: none;
+    background: linear-gradient(90deg, #f0fdf4, #dcfce7);
+    border-top: 2px solid #bbf7d0;
+  }
+  .proj-icon-tile {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .tile-amber { background: #fef3c7; color: #d97706; }
+  .tile-blue  { background: #dbeafe; color: #2563eb; }
+  .tile-green { background: #d1fae5; color: #059669; }
+  .proj-row-label { flex: 0 1 200px; }
+  .proj-row-label .rl-main { font-size: 13px; font-weight: 500; color: var(--text); }
+  .proj-row-label .rl-sub  { font-size: 10px; color: var(--muted); margin-top: 1px; }
+  .proj-row:last-child .rl-main { font-weight: 700; color: #065f46; }
+  .proj-amount { font-size: 15px; font-weight: 700; color: var(--text); white-space: nowrap; min-width: 110px; text-align: right; }
+  .proj-row:last-child .proj-amount { font-size: 18px; color: #047857; }
+
+  /* MAP */
+  .map-section .section-title { margin-bottom: 14px; }
+
+  /* PARTY TABLE */
+  .table-toolbar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 14px; max-width: 90%; margin-left: auto; margin-right: auto;
+    flex-wrap: wrap; gap: 8px;
+  }
+  .search-wrap {
+    position: relative; display: flex; align-items: center;
+  }
+  .search-icon {
+    position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+    color: #94a3b8; font-size: 14px; pointer-events: none;
+  }
+  .search-input {
+    padding: 9px 14px 9px 34px; border: 1.5px solid var(--border);
+    border-radius: 10px; font-size: 13px; width: 280px;
+    outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+    background: var(--surface); color: var(--text);
+  }
+  .search-input:focus {
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(26,86,219,0.12);
+  }
+  .toolbar-right { display: flex; align-items: center; gap: 10px; }
+  .amounts-badge {
+    font-size: 11px; color: var(--muted);
+    background: #f1f5f9; padding: 5px 14px;
+    border-radius: 20px; border: 1px solid var(--border); font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .party-table-wrap {
+    max-width: 90%; margin: 0 auto;
+    border: 1.5px solid var(--border);
+    border-radius: 14px; overflow: hidden;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.07);
+  }
+  #partyTable { width: 100%; border-collapse: collapse; background: var(--surface); }
+  #partyTable thead { position: sticky; top: 0; z-index: 2; }
+  #partyTable th {
+    background: linear-gradient(180deg,#f4f7fb 0%,#edf1f7 100%);
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.9px;
+    color: #64748b;
+    padding: 12px 16px 12px 14px;
+    border-bottom: 2px solid #dde3ec;
+    text-align: left; white-space: nowrap;
+  }
+  #partyTable th.right, #partyTable td.right { text-align: right; }
+  #partyTable td {
+    padding: 11px 16px 11px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 13px;
+    vertical-align: middle;
+    transition: background 0.12s;
+  }
+  /* Coloured group headers per bucket */
+  .group-header-row td {
+    font-weight: 700 !important; font-size: 12px !important;
+    cursor: pointer; user-select: none;
+    padding: 10px 16px 10px 14px !important;
+    letter-spacing: 0.4px; border-bottom: none !important;
+  }
+  .grp-red td    { background: #7f1d1d !important; color: #fecaca !important; }
+  .grp-orange td { background: #7c2d12 !important; color: #fed7aa !important; }
+  .grp-amber td  { background: #78350f !important; color: #fde68a !important; }
+  .grp-blue td   { background: #1e3a5f !important; color: #bfdbfe !important; }
+  .grp-green td  { background: #064e3b !important; color: #a7f3d0 !important; }
+  .grp-red:hover td    { background: #991b1b !important; }
+  .grp-orange:hover td { background: #9a3412 !important; }
+  .grp-amber:hover td  { background: #92400e !important; }
+  .grp-blue:hover td   { background: #1e40af !important; }
+  .grp-green:hover td  { background: #065f46 !important; }
+  /* Party rows — left accent border by overdue */
+  .party-row td:first-child { padding-left: 0 !important; }
+  .party-row { border-left: 4px solid transparent; }
+  .party-row.acc-red    { border-left-color: #dc2626; }
+  .party-row.acc-orange { border-left-color: #ea580c; }
+  .party-row.acc-amber  { border-left-color: #d97706; }
+  .party-row.acc-blue   { border-left-color: #3b82f6; }
+  .party-row.acc-green  { border-left-color: #10b981; }
+  .party-row:nth-child(even) td { background: #fff8f2; }
+  .party-row:hover td { background: #eff4ff !important; }
+  /* Toggle button */
+  .toggle-cell {
+    width: 32px; text-align: center; cursor: pointer;
+    font-size: 11px; color: var(--muted); user-select: none;
+    padding-left: 10px !important;
+  }
+  .tog-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #e8edf5; color: #64748b;
+    font-size: 9px; transition: background 0.15s, transform 0.2s;
+  }
+  .tog-btn.open { background: var(--blue); color: #fff; transform: rotate(90deg); }
+  /* Detail (bill drill-down) row */
+  .detail-row td {
+    background: #f4f7fc !important;
+    padding: 0 !important;
+  }
+  .sub-table-wrap {
+    margin: 6px 12px 10px 36px;
+    border: 1px solid #dde6f0;
+    border-radius: 10px;
+    overflow-x: auto;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.05);
+  }
+  /* Fixed layout guarantees every column honours its declared width */
+  .sub-table {
+    width: 100%; min-width: 560px;
+    border-collapse: separate; border-spacing: 0;
+    table-layout: fixed;
+  }
+  .sub-table th {
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.7px;
+    color: #64748b; padding: 7px 14px;
+    border-bottom: 1px solid #dde6f0;
+    background: linear-gradient(180deg,#eef2f9 0%,#e5ebf5 100%);
+    text-align: left;
+  }
+  .sub-table th.right { text-align: right; }
+  .sub-table td {
+    padding: 8px 14px;
+    font-size: 12px;
+    color: #334155;
+    border-bottom: 1px solid #edf0f6;
+    background: #fff;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sub-table tr:last-child td { border-bottom: none; }
+  .sub-table td.right { text-align: right; }
+  /* Column widths — enforced by table-layout:fixed */
+  .sub-date { width: 95px; }
+  .sub-ref  { width: 145px; }
+  .sub-amt  { width: 130px; }
+  /* Explicit gap column between Pending and Due On */
+  .sub-gap  { width: 24px; border-left: 2px solid #e2e8f0; padding: 0 !important; }
+  .sub-due  { width: 110px; }
+  .sub-ov   { width: 120px; }
+  /* Overdue badges */
+  .overdue-badge {
+    display: inline-block;
+    padding: 3px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.2px;
+  }
+  .ov-0  { background: #dcfce7; color: #16a34a; }
+  .ov-30 { background: #fef9c3; color: #b45309; }
+  .ov-60 { background: #ffedd5; color: #c2410c; }
+  .ov-90 { background: #fee2e2; color: #dc2626; }
+  .ov-90p{ background: #7f1d1d; color: #fecaca; }
+  /* Party name + amount cells */
+  .party-name-cell {
+    font-weight: 600; color: var(--text);
+    max-width: 230px; line-height: 1.35;
+  }
+  .party-name-cell small {
+    display: block; font-size: 10px; font-weight: 400;
+    color: #94a3b8; margin-top: 1px;
+  }
+  .amt-red    { color: #dc2626; font-weight: 700; }
+  .amt-orange { color: #ea580c; font-weight: 700; }
+  .amt-amber  { color: #d97706; font-weight: 700; }
+  .amt-blue   { color: #2563eb; font-weight: 700; }
+  .amt-green  { color: #059669; font-weight: 700; }
+
+  /* BACK TO TOP */
+  #backTop {
+    position: fixed; bottom: 32px; right: 32px;
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--blue); color: #fff;
+    border: none; cursor: pointer;
+    font-size: 20px; line-height: 1;
+    display: none; opacity: 0;
+    align-items: center; justify-content: center;
+    box-shadow: 0 4px 16px rgba(26,86,219,0.4);
+    transition: opacity 0.25s, background 0.2s, box-shadow 0.2s;
+    z-index: 200;
+  }
+  #backTop:hover {
+    background: #1740a8;
+    box-shadow: 0 0 0 3px #0e9f6e, 0 4px 16px rgba(26,86,219,0.4);
+  }
+  #backTop.visible { display: flex; opacity: 1; }
+
+  @media (max-width: 900px) {
+    .aging-layout { grid-template-columns: 1fr; }
+    .proj-grid { grid-template-columns: 1fr; }
+    .kpi-grid { grid-template-columns: 1fr; }
+    .party-table-wrap, .table-toolbar { max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+  <div class="navbar-logo">RD</div>
+  <div class="navbar-title">Receivables Dashboard &mdash; Udaipur Region</div>
+  <div class="navbar-date">As of 22-Mar-2026</div>
+</nav>
+
+<div class="container">
+
+  <!-- SUMMARY -->
+  <div class="section">
+    <div class="section-title">Summary</div>
+    <div class="kpi-grid">
+      <div class="kpi-card blue">
+        <div class="kpi-label">Total Outstanding</div>
+        <div class="kpi-value" id="kpi-total"></div>
+        <div class="kpi-sub">Across all parties</div>
+        <div class="kpi-icon">&#8377;</div>
+      </div>
+      <div class="kpi-card green clickable"
+           onclick="document.getElementById('partySection').scrollIntoView({behavior:'smooth'})"
+           title="Click to view Party-wise Detail">
+        <div class="kpi-label">Total Parties</div>
+        <div class="kpi-value" id="kpi-parties"></div>
+        <div class="kpi-sub" id="kpi-bills-sub"></div>
+        <div class="kpi-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+            <line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AGING ANALYSIS -->
+  <div class="section">
+    <div class="section-title">Aging Analysis</div>
+    <div class="aging-layout">
+      <div class="chart-card">
+        <div class="chart-header">
+          <div class="chart-header-left">
+            <div class="ch-muted">Aging Analysis</div>
+            <div class="ch-title">Outstanding by Aging Bucket</div>
+          </div>
+          <div class="chart-header-right">
+            <div class="ch-muted">Total Outstanding</div>
+            <div class="ch-total" id="chart-total"></div>
+          </div>
+        </div>
+        <div class="chart-body">
+          <div class="chart-wrapper">
+            <canvas id="agingChart"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="top5-card">
+        <div class="top5-header">
+          <div class="top5-header-left">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/></svg>
+            <span class="top5-title">Top 5 Parties</span>
+          </div>
+          <span class="top5-badge">by Outstanding</span>
+        </div>
+        <div class="top5-list" id="top5List"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CASH INFLOW PROJECTIONS -->
+  <div class="section">
+    <div class="section-title">Cash Inflow Projections</div>
+    <div class="proj-grid">
+      <div class="proj-card curr-card">
+        <div class="proj-header">
+          <div class="proj-header-text">
+            <div class="ph-title">Current Week</div>
+            <div class="ph-range" id="currWeekRange">&nbsp;</div>
+          </div>
+          <div class="proj-header-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+              <line x1="8" y1="14" x2="8" y2="14" stroke-width="2.5"/><line x1="12" y1="14" x2="12" y2="14" stroke-width="2.5"/><line x1="8" y1="18" x2="8" y2="18" stroke-width="2.5"/><line x1="12" y1="18" x2="12" y2="18" stroke-width="2.5"/>
+            </svg>
+          </div>
+        </div>
+        <div class="proj-body">
+          <div class="proj-row">
+            <div class="proj-icon-tile tile-amber">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="proj-row-label">
+              <div class="rl-main">Opening Balance</div>
+              <div class="rl-sub">Already overdue before this week</div>
+            </div>
+            <div class="proj-amount" id="proj-curr-opening"></div>
+          </div>
+          <div class="proj-row">
+            <div class="proj-icon-tile tile-blue">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+            </div>
+            <div class="proj-row-label">
+              <div class="rl-main">Bills Due This Week</div>
+              <div class="rl-sub">Due Mon &ndash; Sun</div>
+            </div>
+            <div class="proj-amount" id="proj-curr-week"></div>
+          </div>
+          <div class="proj-row">
+            <div class="proj-icon-tile tile-green">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div class="proj-row-label">
+              <div class="rl-main">Total Expected Inflow</div>
+            </div>
+            <div class="proj-amount" id="proj-curr-total"></div>
+          </div>
+        </div>
+      </div>
+      <div class="proj-card next-card">
+        <div class="proj-header">
+          <div class="proj-header-text">
+            <div class="ph-title">Next Week</div>
+            <div class="ph-range" id="nextWeekRange">&nbsp;</div>
+          </div>
+          <div class="proj-header-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+              <line x1="16" y1="14" x2="16" y2="14" stroke-width="2.5"/><line x1="12" y1="14" x2="12" y2="14" stroke-width="2.5"/><line x1="16" y1="18" x2="16" y2="18" stroke-width="2.5"/><line x1="12" y1="18" x2="12" y2="18" stroke-width="2.5"/>
+            </svg>
+          </div>
+        </div>
+        <div class="proj-body">
+          <div class="proj-row">
+            <div class="proj-icon-tile tile-amber">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="proj-row-label">
+              <div class="rl-main">Opening Balance</div>
+              <div class="rl-sub">Carried forward from current week</div>
+            </div>
+            <div class="proj-amount" id="proj-next-opening"></div>
+          </div>
+          <div class="proj-row">
+            <div class="proj-icon-tile tile-blue">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+            </div>
+            <div class="proj-row-label">
+              <div class="rl-main">Bills Due Next Week</div>
+              <div class="rl-sub">Due Mon &ndash; Sun</div>
+            </div>
+            <div class="proj-amount" id="proj-next-week"></div>
+          </div>
+          <div class="proj-row">
+            <div class="proj-icon-tile tile-green">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div class="proj-row-label">
+              <div class="rl-main">Total Expected Inflow</div>
+            </div>
+            <div class="proj-amount" id="proj-next-total"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GEOGRAPHIC DISTRIBUTION -->
+  <div class="section map-section">
+    <div class="section-title">Geographic Distribution</div>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  /* Override Leaflet's default divIcon box — must target leaflet-div-icon */
+  .leaflet-div-icon.place-label-icon {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  .place-label {
+    background: rgba(255,255,255,0.90);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #1e293b;
+    white-space: nowrap;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+    pointer-events: none;
+    display: inline-block;
+  }
+</style>
+<div id="leaflet-map" style="width:100%;height:500px;border-radius:12px;"></div>
+<script>
+  // Initialise with a fallback view; fitBounds below overrides it
+  var map = L.map('leaflet-map').setView([24.5937, 73.6855], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 18
+  }).addTo(map);
+
+  // Legend
+  var legend = L.control({position: 'bottomright'});
+  legend.onAdd = function() {
+    var d = L.DomUtil.create('div', '');
+    d.style.cssText = 'background:white;padding:8px 12px;border-radius:6px;font-size:12px;line-height:1.8;box-shadow:0 1px 5px rgba(0,0,0,0.2)';
+    d.innerHTML = '<b>Overdue</b><br>'
+      + '<span style="color:#e02424">●</span> &gt;90 days<br>'
+      + '<span style="color:#ff5a1f">●</span> 31–90 days<br>'
+      + '<span style="color:#0e9f6e">●</span> Current / &lt;30 days';
+    return d;
+  };
+  legend.addTo(map);
+
+  // Circle markers (hover tooltips) — jittered so all are visible
+  L.circleMarker([24.585784,73.710023], {radius:19,color:'#e02424',fillColor:'#e02424',fillOpacity:0.75,weight:2}).bindTooltip('ANGAD RESTORENT BALICHA<br>₹5,587<br>Rajasthan – 313001<br>Overdue: 92d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.560026,73.70896], {radius:28,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('BAJRANG DUDH DAIRY & GEN (RK PURAM)<br>₹14,827<br>Rajasthan – 313002<br>Overdue: 80d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.587011,73.782089], {radius:11,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('BIKANER PRO. STORE RK PURAM<br>₹836<br>Rajasthan – 313003<br>Overdue: 73d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.595508,73.691101], {radius:26,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('FRIENDS ICE CREAM (UMARDA)<br>₹12,866<br>Rajasthan – 313004<br>Overdue: 73d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.663236,73.641945], {radius:20,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('HEALTH CARE PHARMACY-Sect-3<br>₹6,512<br>Rajasthan – 313011<br>Overdue: 78d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.727643,73.660731], {radius:23,color:'#e02424',fillColor:'#e02424',fillOpacity:0.75,weight:2}).bindTooltip('JAI AMBAY JODHPUR SWEETS & BAKERY [2334955]<br>₹8,876<br>Rajasthan – 313024<br>Overdue: 94d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.448359,73.557012], {radius:20,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('JAI MEWAR JUICE SEC 6<br>₹6,844<br>Rajasthan – 313031<br>Overdue: 72d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.560026,73.70736], {radius:13,color:'#e02424',fillColor:'#e02424',fillOpacity:0.75,weight:2}).bindTooltip('JAY BHERAV DERY-Sect-11<br>₹1,614<br>Rajasthan – 313002<br>Overdue: 101d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.022356,73.55872], {radius:18,color:'#e02424',fillColor:'#e02424',fillOpacity:0.75,weight:2}).bindTooltip('JMB DAIRY (SAVINA)<br>₹4,547<br>Rajasthan – 313803<br>Overdue: 91d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.586477,73.709623], {radius:17,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('KAMAKSHI STORE TITARDI<br>₹3,715<br>Rajasthan – 313001<br>Overdue: 70d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.586477,73.708823], {radius:26,color:'#0e9f6e',fillColor:'#0e9f6e',fillOpacity:0.75,weight:2}).bindTooltip('KRISHNA DAIRY SEC 3<br>₹13,136<br>Rajasthan – 313001<br>Overdue: 29d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.585784,73.708423], {radius:17,color:'#0e9f6e',fillColor:'#0e9f6e',fillOpacity:0.75,weight:2}).bindTooltip('KRISHNA DUDH DAIRY 14<br>₹4,025<br>Rajasthan – 313001<br>Overdue: 16d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.023836,73.826257], {radius:14,color:'#e02424',fillColor:'#e02424',fillOpacity:0.75,weight:2}).bindTooltip('MAHAVEER KIRANA STOREA<br>₹2,446<br>Rajasthan – 313903<br>Overdue: 103d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.150662,74.041489], {radius:24,color:'#e02424',fillColor:'#e02424',fillOpacity:0.75,weight:2}).bindTooltip('MANOJ KIRANA SEC 14<br>₹10,459<br>Rajasthan – 313027<br>Overdue: 113d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.725439,73.46519], {radius:27,color:'#e02424',fillColor:'#e02424',fillOpacity:0.75,weight:2}).bindTooltip('MAYANK TRADERS SEC-4<br>₹13,932<br>Rajasthan – 313705<br>Overdue: 112d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.585091,73.708823], {radius:22,color:'#e02424',fillColor:'#e02424',fillOpacity:0.75,weight:2}).bindTooltip('Mahalaxmi Misthan Bhandar(Sec.5)<br>₹8,507<br>Rajasthan – 313001<br>Overdue: 101d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.5937,73.6855], {radius:17,color:'#e02424',fillColor:'#e02424',fillOpacity:0.75,weight:2}).bindTooltip('NEW BHERUNATH DUTH DAIRY<br>₹3,841<br>Rajasthan – 313005<br>Overdue: 110d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.663929,73.640745], {radius:9,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('OM KIRANA SEC 14<br>₹307<br>Rajasthan – 313011<br>Overdue: 58d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.728336,73.659531], {radius:17,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('PATEL DUDH DAIRY & KIRANA (EKLINGPURA)<br>₹3,964<br>Rajasthan – 313024<br>Overdue: 48d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.662543,73.640745], {radius:15,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('RAJLAXMI BAKERY(SEC.14)<br>₹2,627<br>Rajasthan – 313011<br>Overdue: 75d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.587011,73.780489], {radius:20,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('RAMA MEDICAL STORESEC-14<br>₹6,060<br>Rajasthan – 313003<br>Overdue: 90d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.72695,73.659531], {radius:9,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('SAI BAKERS SEC 5<br>₹488<br>Rajasthan – 313024<br>Overdue: 57d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.5937,73.6855], {radius:12,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('SK PROVISION STORE SEC 11<br>₹1,309<br>Rajasthan – 313025<br>Overdue: 83d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+L.circleMarker([24.585091,73.709623], {radius:8,color:'#ff5a1f',fillColor:'#ff5a1f',fillOpacity:0.75,weight:2}).bindTooltip('VARSHA RESTAURANT(Titardi)<br>₹227<br>Rajasthan – 313001<br>Overdue: 84d', {sticky:true, direction:'top', offset:[0,-4]}).addTo(map);
+
+
+  // Permanent place-name labels
+  L.marker([24.585784,73.709223], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Pratapnagar</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.560026,73.70816], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">H Magri</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.587011,73.781289], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Girwa</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.595508,73.691101], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Udaipur City</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.663236,73.641145], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Badgaon</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.727643,73.659931], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Debari</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.448359,73.557012], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Sisarma</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.022356,73.55872], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Kherwara</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.023836,73.826257], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Kalyanpur</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.150662,74.041489], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Salumber</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.725439,73.46519], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Gogunda</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.5937,73.6855], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Udaipur City</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+L.marker([24.5937,73.6855], {
+  icon: L.divIcon({
+    className: 'place-label-icon',
+    html: '<div class="place-label">Bari</div>',
+    iconSize: [0, 0],
+    iconAnchor: [0, 8]
+  })
+}).addTo(map);
+
+
+  // Auto-fit zoom to show all markers with padding
+  var allPoints = [[24.585784,73.710023],[24.560026,73.70896],[24.587011,73.782089],[24.595508,73.691101],[24.663236,73.641945],[24.727643,73.660731],[24.448359,73.557012],[24.560026,73.70736],[24.022356,73.55872],[24.586477,73.709623],[24.586477,73.708823],[24.585784,73.708423],[24.023836,73.826257],[24.150662,74.041489],[24.725439,73.46519],[24.585091,73.708823],[24.5937,73.6855],[24.663929,73.640745],[24.728336,73.659531],[24.662543,73.640745],[24.587011,73.780489],[24.72695,73.659531],[24.5937,73.6855],[24.585091,73.709623]];
+  if (allPoints.length > 0) {
+    map.fitBounds(L.latLngBounds(allPoints), { padding: [30, 30] });
+  }
+</script>
+  </div>
+
+  <!-- PARTY-WISE DETAIL -->
+  <div class="section" id="partySection">
+    <div class="section-title">Party-wise Detail</div>
+    <div class="table-toolbar">
+      <div class="search-wrap">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" class="search-input" id="searchInput"
+               placeholder="Search party name, state or pincode&hellip;"
+               oninput="filterTable()"/>
+      </div>
+      <div class="toolbar-right">
+        <span class="amounts-badge">Amounts in &#8377;</span>
+      </div>
+    </div>
+    <div class="party-table-wrap">
+      <table id="partyTable">
+        <colgroup>
+          <col style="width:28px"/>
+          <col style="width:220px"/>
+          <col style="width:85px"/>
+          <col style="width:75px"/>
+          <col style="width:110px"/>
+          <col style="width:54px"/>
+          <col style="width:80px"/>
+        </colgroup>
+        <thead>
+          <tr>
+            <th></th>
+            <th>Party Name</th>
+            <th>State</th>
+            <th>Pincode</th>
+            <th class="right">Outstanding (&#8377;)</th>
+            <th class="right">Bills</th>
+            <th class="right">Overdue</th>
+          </tr>
+        </thead>
+        <tbody id="partyTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- BACK TO TOP -->
+<button id="backTop" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top">&#8593;</button>
+
+<script>
+/* =====================================================
+   DATA CONSTANTS
+===================================================== */
+const GRAND_TOTAL = 140301.96;
+const PARTY_COUNT = 25;
+const BILL_COUNT  = 56;
+const AGING = {
+  overdue_1_30:     65628.0,
+  overdue_31_60:    15958.96,
+  overdue_61_90:    17744.0,
+  overdue_above_90: 34447.0
+};
+
+const PARTIES = [
+  { name:'BAJRANG DUDH DAIRY & GEN (RK PURAM)', state:'Rajasthan', pincode:'313002', outstanding:14827.0, bill_count:4, max_days:80,
+    bills:[
+      {ref:'MDLZ727', date:'14-Jan-26', due:'14-Jan-26', amt:2605.0, overdue:80},
+      {ref:'MDLZ2938', date:'18-Mar-26', due:'18-Mar-26', amt:2259.0, overdue:17},
+      {ref:'MDLZ/1', date:'24-Mar-26', due:'24-Mar-26', amt:8475.0, overdue:11},
+      {ref:'MDLZ/2', date:'3-Apr-26', due:'3-Apr-26', amt:1488.0, overdue:1}
+    ]}, 
+  { name:'MAYANK TRADERS SEC-4', state:'Rajasthan', pincode:'313705', outstanding:13932.0, bill_count:4, max_days:112,
+    bills:[
+      {ref:'MDLZ/2', date:'13-Dec-25', due:'13-Dec-25', amt:8475.0, overdue:112},
+      {ref:'CDM/DEC25/58', date:'24-Dec-25', due:'24-Dec-25', amt:582.0, overdue:101},
+      {ref:'MDLZ2327', date:'23-Feb-26', due:'23-Feb-26', amt:118.0, overdue:40},
+      {ref:'MDLZ/6', date:'25-Mar-26', due:'25-Mar-26', amt:4757.0, overdue:10}
+    ]}, 
+  { name:'KRISHNA DAIRY SEC 3', state:'Rajasthan', pincode:'313001', outstanding:13136.0, bill_count:2, max_days:29,
+    bills:[
+      {ref:'MDLZ2640', date:'6-Mar-26', due:'6-Mar-26', amt:436.0, overdue:29},
+      {ref:'MDLZ/1', date:'2-Apr-26', due:'2-Apr-26', amt:12700.0, overdue:2}
+    ]}, 
+  { name:'FRIENDS ICE CREAM (UMARDA)', state:'Rajasthan', pincode:'313004', outstanding:12866.0, bill_count:4, max_days:73,
+    bills:[
+      {ref:'MDLZ1237', date:'21-Jan-26', due:'21-Jan-26', amt:1844.0, overdue:73},
+      {ref:'MDLZ1482', date:'28-Jan-26', due:'28-Jan-26', amt:1469.0, overdue:66},
+      {ref:'MDLZ2580', date:'4-Mar-26', due:'4-Mar-26', amt:4796.0, overdue:31},
+      {ref:'MDLZ/2', date:'27-Mar-26', due:'27-Mar-26', amt:4757.0, overdue:8}
+    ]}, 
+  { name:'MANOJ KIRANA SEC 14', state:'Rajasthan', pincode:'313027', outstanding:10459.0, bill_count:4, max_days:113,
+    bills:[
+      {ref:'MDLZ/1', date:'12-Dec-25', due:'12-Dec-25', amt:2030.0, overdue:113},
+      {ref:'CASH3517', date:'2-Feb-26', due:'2-Feb-26', amt:53.0, overdue:61},
+      {ref:'MDLZ2289', date:'22-Feb-26', due:'22-Feb-26', amt:536.0, overdue:41},
+      {ref:'MDLZ/5', date:'25-Mar-26', due:'25-Mar-26', amt:7840.0, overdue:10}
+    ]}, 
+  { name:'JAI AMBAY JODHPUR SWEETS & BAKERY [2334955]', state:'Rajasthan', pincode:'313024', outstanding:8876.0, bill_count:2, max_days:94,
+    bills:[
+      {ref:'MDLZ298', date:'31-Dec-25', due:'31-Dec-25', amt:7076.0, overdue:94},
+      {ref:'MDLZ/7', date:'29-Mar-26', due:'29-Mar-26', amt:1800.0, overdue:6}
+    ]}, 
+  { name:'Mahalaxmi Misthan Bhandar(Sec.5)', state:'Rajasthan', pincode:'313001', outstanding:8507.0, bill_count:4, max_days:101,
+    bills:[
+      {ref:'CDM/DEC25/72', date:'24-Dec-25', due:'24-Dec-25', amt:2076.0, overdue:101},
+      {ref:'MDLZ245', date:'29-Dec-25', due:'29-Dec-25', amt:4000.0, overdue:96},
+      {ref:'MDLZ3344', date:'30-Mar-26', due:'30-Mar-26', amt:1915.0, overdue:5},
+      {ref:'MDLZ/3', date:'4-Apr-26', due:'4-Apr-26', amt:516.0, overdue:0}
+    ]}, 
+  { name:'JAI MEWAR JUICE SEC 6', state:'Rajasthan', pincode:'313031', outstanding:6844.0, bill_count:3, max_days:72,
+    bills:[
+      {ref:'CDM/JAN25/255', date:'22-Jan-26', due:'22-Jan-26', amt:1529.0, overdue:72},
+      {ref:'MDLZ/9', date:'30-Mar-26', due:'30-Mar-26', amt:3866.0, overdue:5},
+      {ref:'MDLZ/8', date:'2-Apr-26', due:'2-Apr-26', amt:1449.0, overdue:2}
+    ]}, 
+  { name:'HEALTH CARE PHARMACY-Sect-3', state:'Rajasthan', pincode:'313011', outstanding:6512.0, bill_count:2, max_days:78,
+    bills:[
+      {ref:'CDM/JAN25/243', date:'16-Jan-26', due:'16-Jan-26', amt:1112.0, overdue:78},
+      {ref:'MDLZ/3', date:'18-Mar-26', due:'18-Mar-26', amt:5400.0, overdue:17}
+    ]}, 
+  { name:'RAMA MEDICAL STORESEC-14', state:'Rajasthan', pincode:'313003', outstanding:6060.0, bill_count:3, max_days:90,
+    bills:[
+      {ref:'MDLZ428', date:'4-Jan-26', due:'4-Jan-26', amt:2187.0, overdue:90},
+      {ref:'K/234', date:'5-Jan-26', due:'5-Jan-26', amt:873.0, overdue:89},
+      {ref:'MDLZ2074', date:'15-Feb-26', due:'15-Feb-26', amt:3000.0, overdue:48}
+    ]}, 
+  { name:'ANGAD RESTORENT BALICHA', state:'Rajasthan', pincode:'313001', outstanding:5587.0, bill_count:2, max_days:92,
+    bills:[
+      {ref:'CDM/JAN26/30', date:'2-Jan-26', due:'2-Jan-26', amt:1237.0, overdue:92},
+      {ref:'MDLZ/1', date:'4-Apr-26', due:'4-Apr-26', amt:4350.0, overdue:0}
+    ]}, 
+  { name:'JMB DAIRY (SAVINA)', state:'Rajasthan', pincode:'313803', outstanding:4547.0, bill_count:2, max_days:91,
+    bills:[
+      {ref:'MDLZ394', date:'3-Jan-26', due:'3-Jan-26', amt:1397.0, overdue:91},
+      {ref:'MDLZ/11', date:'31-Mar-26', due:'31-Mar-26', amt:3150.0, overdue:4}
+    ]}, 
+  { name:'KRISHNA DUDH DAIRY 14', state:'Rajasthan', pincode:'313001', outstanding:4025.0, bill_count:3, max_days:16,
+    bills:[
+      {ref:'MDLZ3003', date:'19-Mar-26', due:'19-Mar-26', amt:509.0, overdue:16},
+      {ref:'MDLZ3212', date:'26-Mar-26', due:'26-Mar-26', amt:3000.0, overdue:9},
+      {ref:'MDLZ/2', date:'3-Apr-26', due:'3-Apr-26', amt:516.0, overdue:1}
+    ]}, 
+  { name:'PATEL DUDH DAIRY & KIRANA (EKLINGPURA)', state:'Rajasthan', pincode:'313024', outstanding:3964.0, bill_count:1, max_days:48,
+    bills:[
+      {ref:'CDM/FEB25/122', date:'15-Feb-26', due:'15-Feb-26', amt:3964.0, overdue:48}
+    ]}, 
+  { name:'NEW BHERUNATH DUTH DAIRY', state:'Rajasthan', pincode:'313005', outstanding:3841.0, bill_count:2, max_days:110,
+    bills:[
+      {ref:'MDLZ/3', date:'15-Dec-25', due:'15-Dec-25', amt:1691.0, overdue:110},
+      {ref:'CDM/DEC25/54', date:'24-Dec-25', due:'24-Dec-25', amt:2150.0, overdue:101}
+    ]}, 
+  { name:'KAMAKSHI STORE TITARDI', state:'Rajasthan', pincode:'313001', outstanding:3715.0, bill_count:3, max_days:70,
+    bills:[
+      {ref:'MDLZ1351', date:'24-Jan-26', due:'24-Jan-26', amt:1336.0, overdue:70},
+      {ref:'MDLZ3079', date:'21-Mar-26', due:'21-Mar-26', amt:721.0, overdue:14},
+      {ref:'MDLZ/13', date:'4-Apr-26', due:'4-Apr-26', amt:1658.0, overdue:0}
+    ]}, 
+  { name:'SALES RETURN - GST [SRGST-12]', state:'Rajasthan', pincode:'—', outstanding:2749.96, bill_count:1, max_days:40,
+    bills:[
+      {ref:'525', date:'23-Feb-26', due:'23-Feb-26', amt:2749.96, overdue:40}
+    ]}, 
+  { name:'RAJLAXMI BAKERY(SEC.14)', state:'Rajasthan', pincode:'313011', outstanding:2627.0, bill_count:1, max_days:75,
+    bills:[
+      {ref:'CDM/JAN25/224', date:'19-Jan-26', due:'19-Jan-26', amt:2627.0, overdue:75}
+    ]}, 
+  { name:'MAHAVEER KIRANA STOREA', state:'Rajasthan', pincode:'313903', outstanding:2446.0, bill_count:1, max_days:103,
+    bills:[
+      {ref:'CDM/DEC25/9', date:'22-Dec-25', due:'22-Dec-25', amt:2446.0, overdue:103}
+    ]}, 
+  { name:'JAY BHERAV DERY-Sect-11', state:'Rajasthan', pincode:'313002', outstanding:1614.0, bill_count:2, max_days:101,
+    bills:[
+      {ref:'CDM/DEC25/44', date:'24-Dec-25', due:'24-Dec-25', amt:1287.0, overdue:101},
+      {ref:'MDLZ/10', date:'31-Mar-26', due:'31-Mar-26', amt:327.0, overdue:4}
+    ]}, 
+  { name:'SK PROVISION STORE SEC 11', state:'Rajasthan', pincode:'313025', outstanding:1309.0, bill_count:1, max_days:83,
+    bills:[
+      {ref:'MDLZ630', date:'11-Jan-26', due:'11-Jan-26', amt:1309.0, overdue:83}
+    ]}, 
+  { name:'BIKANER PRO. STORE RK PURAM', state:'Rajasthan', pincode:'313003', outstanding:836.0, bill_count:2, max_days:73,
+    bills:[
+      {ref:'MDLZ1247', date:'21-Jan-26', due:'21-Jan-26', amt:573.0, overdue:73},
+      {ref:'MDLZ/1', date:'22-Mar-26', due:'22-Mar-26', amt:263.0, overdue:13}
+    ]}, 
+  { name:'SAI BAKERS SEC 5', state:'Rajasthan', pincode:'313024', outstanding:488.0, bill_count:1, max_days:57,
+    bills:[
+      {ref:'MDLZ1752', date:'6-Feb-26', due:'6-Feb-26', amt:488.0, overdue:57}
+    ]}, 
+  { name:'OM KIRANA SEC 14', state:'Rajasthan', pincode:'313011', outstanding:307.0, bill_count:1, max_days:58,
+    bills:[
+      {ref:'MDLZ1711', date:'5-Feb-26', due:'5-Feb-26', amt:307.0, overdue:58}
+    ]}, 
+  { name:'VARSHA RESTAURANT(Titardi)', state:'Rajasthan', pincode:'313001', outstanding:227.0, bill_count:1, max_days:84,
+    bills:[
+      {ref:'MDLZ604', date:'10-Jan-26', due:'10-Jan-26', amt:227.0, overdue:84}
+    ]}, 
+];
+
+const TOP5 = [
+  { name:'BAJRANG DUDH DAIRY & GEN (RK PURAM)', outstanding:14827.0, bills:4 },
+  { name:'MAYANK TRADERS SEC-4', outstanding:13932.0, bills:4 },
+  { name:'KRISHNA DAIRY SEC 3', outstanding:13136.0, bills:2 },
+  { name:'FRIENDS ICE CREAM (UMARDA)', outstanding:12866.0, bills:4 },
+  { name:'MANOJ KIRANA SEC 14', outstanding:10459.0, bills:4 }
+];
+
+/* =====================================================
+   HELPERS
+===================================================== */
+function fINR(n) {
+  if (n == null || isNaN(n)) return '\u20B90.00';
+  var neg = n < 0;
+  n = Math.abs(n);
+  var parts = n.toFixed(2).split('.');
+  var intPart = parts[0];
+  var dec = parts[1];
+  if (intPart.length > 3) {
+    var last3 = intPart.slice(-3);
+    var rest = intPart.slice(0, -3);
+    intPart = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3;
+  }
+  return (neg ? '-' : '') + '\u20B9' + intPart + '.' + dec;
+}
+
+function parseDueDate(str) {
+  var months = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
+  var parts = str.split('-');
+  if (parts.length !== 3) return null;
+  var d = parseInt(parts[0], 10);
+  var m = months[parts[1]];
+  var y = 2000 + parseInt(parts[2], 10);
+  if (isNaN(d) || m === undefined || isNaN(y)) return null;
+  return new Date(y, m, d);
+}
+
+function weekBounds(offset) {
+  var today = new Date();
+  var dow = today.getDay();
+  var mondayOffset = (dow === 0) ? -6 : 1 - dow;
+  var mon = new Date(today);
+  mon.setDate(today.getDate() + mondayOffset + offset * 7);
+  mon.setHours(0, 0, 0, 0);
+  var sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  sun.setHours(23, 59, 59, 999);
+  return { mon: mon, sun: sun };
+}
+
+function ovClass(days) {
+  if (days === 0) return 'ov-0';
+  if (days <= 30) return 'ov-30';
+  if (days <= 60) return 'ov-60';
+  if (days <= 90) return 'ov-90';
+  return 'ov-90p';
+}
+
+/* =====================================================
+   STATIC TEXT
+===================================================== */
+document.getElementById('kpi-total').textContent = fINR(GRAND_TOTAL);
+document.getElementById('kpi-parties').textContent = PARTY_COUNT;
+document.getElementById('kpi-bills-sub').textContent = BILL_COUNT + ' bills outstanding';
+document.getElementById('chart-total').textContent = fINR(GRAND_TOTAL);
+
+/* =====================================================
+   TOP 5 LIST
+===================================================== */
+(function buildTop5() {
+  var maxAmt = TOP5[0].outstanding;
+  var list = document.getElementById('top5List');
+  var rankCls = ['rank-1','rank-2','rank-3','rank-4','rank-5'];
+  var html = '';
+  TOP5.forEach(function(p, i) {
+    var pct      = (p.outstanding / maxAmt * 100).toFixed(0);
+    var sharePct = (p.outstanding / GRAND_TOTAL * 100).toFixed(1);
+    html += '<div class="top5-item">'
+      + '<div class="top5-rank ' + rankCls[i] + '">' + (i + 1) + '</div>'
+      + '<div class="top5-info">'
+      +   '<div class="top5-name" title="' + p.name + '">' + p.name + '</div>'
+      +   '<div class="top5-bills">' + p.bills + ' bill' + (p.bills !== 1 ? 's' : '') + '</div>'
+      +   '<div class="top5-bar-track"><div class="top5-bar-fill" style="width:' + pct + '%"></div></div>'
+      + '</div>'
+      + '<div class="top5-right">'
+      +   '<div class="top5-amt">' + fINR(p.outstanding) + '</div>'
+      +   '<div class="top5-pct">' + sharePct + '% of total</div>'
+      + '</div>'
+      + '</div>';
+  });
+  list.innerHTML = html;
+})();
+
+/* =====================================================
+   AGING CHART — bucket party assignment
+===================================================== */
+var bucketParties = [[], [], [], []];
+PARTIES.forEach(function(p) {
+  var d = p.max_days;
+  if (d <= 30)      bucketParties[0].push(p.name);
+  else if (d <= 60) bucketParties[1].push(p.name);
+  else if (d <= 90) bucketParties[2].push(p.name);
+  else              bucketParties[3].push(p.name);
+});
+
+var agingLabels = ['1\u201330 Days', '31\u201360 Days', '61\u201390 Days', '> 90 Days'];
+var agingValues = [
+  AGING.overdue_1_30,
+  AGING.overdue_31_60,
+  AGING.overdue_61_90,
+  AGING.overdue_above_90
+];
+var agingColors = [
+  'rgba(245,158,11,0.82)',
+  'rgba(255,90,31,0.82)',
+  'rgba(224,36,36,0.82)',
+  'rgba(127,29,29,0.82)'
+];
+
+/* =====================================================
+   INLINE BAR LABELS PLUGIN (3-D effect)
+===================================================== */
+var barLabelsPlugin = {
+  id: 'barLabels',
+  afterDatasetsDraw: function(chart) {
+    var ctx = chart.ctx;
+    var total = agingValues.reduce(function(a, b) { return a + b; }, 0);
+    var meta = chart.getDatasetMeta(0);
+
+    meta.data.forEach(function(bar, i) {
+      var value = agingValues[i];
+      var barH = Math.abs(bar.y - bar.base);
+      if (barH < 4) return;
+
+      var hw    = bar.width / 2;
+      var depth = Math.max(4, Math.round(hw * 0.22));
+      var xL = bar.x - hw, xR = bar.x + hw;
+      var yT = bar.y,      yB = bar.base;
+
+      // Top face
+      ctx.beginPath();
+      ctx.moveTo(xL, yT);
+      ctx.lineTo(xL + depth, yT - depth);
+      ctx.lineTo(xR + depth, yT - depth);
+      ctx.lineTo(xR, yT);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,255,255,0.30)';
+      ctx.fill();
+
+      // Right face
+      ctx.beginPath();
+      ctx.moveTo(xR, yT);
+      ctx.lineTo(xR + depth, yT - depth);
+      ctx.lineTo(xR + depth, yB - depth);
+      ctx.lineTo(xR, yB);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(0,0,0,0.26)';
+      ctx.fill();
+
+      // Text labels only when bar is tall enough
+      if (barH < 28) return;
+      var midY = (bar.y + bar.base) / 2;
+      var pct = (value / total * 100).toFixed(1);
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      ctx.fillText(fINR(value), bar.x, midY - 8);
+      ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      ctx.fillText(pct + '% of total', bar.x, midY + 8);
+    });
+  }
+};
+
+Chart.register(barLabelsPlugin);
+
+/* =====================================================
+   CHART INIT
+===================================================== */
+var agingCtx = document.getElementById('agingChart').getContext('2d');
+new Chart(agingCtx, {
+  type: 'bar',
+  data: {
+    labels: agingLabels,
+    datasets: [{
+      label: 'Outstanding',
+      data: agingValues,
+      backgroundColor: agingColors,
+      borderColor: agingColors.map(function(c) { return c.replace('0.82', '1'); }),
+      borderWidth: 1,
+      borderRadius: 2,
+      borderSkipped: 'bottom'
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: '#1e293b',
+        titleColor: '#e2e8f0',
+        bodyColor: '#cbd5e1',
+        displayColors: false,
+        padding: 12,
+        callbacks: {
+          title: function(items) {
+            var idx = items[0].dataIndex;
+            var names = ['1\u201330 Days', '31\u201360 Days', '61\u201390 Days', '> 90 Days'];
+            var count = bucketParties[idx].length;
+            return names[idx] + ' (' + count + (count === 1 ? ' party' : ' parties') + ')';
+          },
+          label: function() { return null; },
+          afterBody: function(items) {
+            var idx = items[0].dataIndex;
+            return bucketParties[idx].map(function(n) { return '  \u2022 ' + n; });
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { color: '#64748b', font: { size: 11 } }
+      },
+      y: {
+        grid: { color: '#f1f5f9' },
+        ticks: {
+          color: '#64748b',
+          font: { size: 11 },
+          callback: function(v) {
+            var n = v;
+            var parts = Math.abs(n).toFixed(0).split('.');
+            var intPart = parts[0];
+            if (intPart.length > 3) {
+              var last3 = intPart.slice(-3);
+              var rest = intPart.slice(0, -3);
+              intPart = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3;
+            }
+            return '\u20B9' + intPart;
+          }
+        }
+      }
+    }
+  }
+});
+
+/* =====================================================
+   CASH INFLOW PROJECTIONS
+===================================================== */
+(function buildProjections() {
+  var curr = weekBounds(0);
+  var next = weekBounds(1);
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function fmtRange(from, to) {
+    var yyyy = String(to.getFullYear());
+    if (from.getMonth() === to.getMonth() && from.getFullYear() === to.getFullYear()) {
+      // Same month: "16–22 Mar 2026"
+      return from.getDate() + '\u2013' + to.getDate() + ' ' + months[to.getMonth()] + ' ' + yyyy;
+    }
+    // Different months: "28 Mar – 3 Apr 2026"
+    return from.getDate() + ' ' + months[from.getMonth()] + ' \u2013 ' + to.getDate() + ' ' + months[to.getMonth()] + ' ' + yyyy;
+  }
+
+  document.getElementById('currWeekRange').textContent = fmtRange(curr.mon, curr.sun);
+  document.getElementById('nextWeekRange').textContent = fmtRange(next.mon, next.sun);
+
+  var openingCurr = 0, currWeekAmt = 0, nextWeekAmt = 0;
+
+  PARTIES.forEach(function(p) {
+    p.bills.forEach(function(b) {
+      var dueDate = parseDueDate(b.due);
+      if (!dueDate) return;
+      if (dueDate < curr.mon) {
+        openingCurr += b.amt;
+      } else if (dueDate >= curr.mon && dueDate <= curr.sun) {
+        currWeekAmt += b.amt;
+      } else if (dueDate >= next.mon && dueDate <= next.sun) {
+        nextWeekAmt += b.amt;
+      }
+    });
+  });
+
+  var openingNext = openingCurr + currWeekAmt;
+
+  document.getElementById('proj-curr-opening').textContent = fINR(openingCurr);
+  document.getElementById('proj-curr-week').textContent    = fINR(currWeekAmt);
+  document.getElementById('proj-curr-total').textContent   = fINR(openingCurr + currWeekAmt);
+  document.getElementById('proj-next-opening').textContent = fINR(openingNext);
+  document.getElementById('proj-next-week').textContent    = fINR(nextWeekAmt);
+  document.getElementById('proj-next-total').textContent   = fINR(openingNext + nextWeekAmt);
+})();
+
+/* =====================================================
+   PARTY TABLE
+===================================================== */
+(function buildTable() {
+  var buckets = [
+    { label: '> 90 Days',        min: 91,  max: Infinity, grpCls: 'grp-red',    accCls: 'acc-red',    amtCls: 'amt-red'    },
+    { label: '61\u201390 Days',  min: 61,  max: 90,       grpCls: 'grp-orange', accCls: 'acc-orange', amtCls: 'amt-orange' },
+    { label: '31\u201360 Days',  min: 31,  max: 60,       grpCls: 'grp-amber',  accCls: 'acc-amber',  amtCls: 'amt-amber'  },
+    { label: '1\u201330 Days',   min: 1,   max: 30,       grpCls: 'grp-blue',   accCls: 'acc-blue',   amtCls: 'amt-blue'   },
+    { label: 'Current (Not Due)',min: 0,   max: 0,        grpCls: 'grp-green',  accCls: 'acc-green',  amtCls: 'amt-green'  }
+  ];
+
+  var tbody = document.getElementById('partyTableBody');
+  var html = '';
+  var groupIdx = 0;
+
+  buckets.forEach(function(bucket) {
+    var grouped = PARTIES.filter(function(p) {
+      if (bucket.min === 0 && bucket.max === 0) return p.max_days === 0;
+      return p.max_days >= bucket.min && p.max_days <= bucket.max;
+    });
+    if (grouped.length === 0) return;
+
+    var bucketTotal = grouped.reduce(function(s, p) { return s + p.outstanding; }, 0);
+    var gid = 'grp' + groupIdx++;
+
+    html += '<tr class="group-header-row ' + bucket.grpCls + '" onclick="toggleGroup(\'' + gid + '\')">'
+      + '<td colspan="7">'
+      + '<span style="margin-right:8px;font-size:11px;opacity:0.8;vertical-align:middle;" id="' + gid + '-arrow">\u25BC</span>'
+      + bucket.label
+      + '<span style="font-size:11px;font-weight:400;opacity:0.80;margin-left:10px;">'
+      + '\u2014 ' + grouped.length + (grouped.length === 1 ? ' party' : ' parties')
+      + '&nbsp;&nbsp;\u00B7&nbsp;&nbsp;' + fINR(bucketTotal)
+      + '</span>'
+      + '</td></tr>';
+
+    grouped.forEach(function(p, pi) {
+      var rid = gid + '_r' + pi;
+      var did = gid + '_d' + pi;
+
+      html += '<tr class="party-row ' + bucket.accCls + '" data-group="' + gid + '" id="' + rid + '">'
+        + '<td class="toggle-cell" onclick="toggleDetail(\'' + did + '\',\'' + rid + '\',event)" id="' + rid + '-tog">'
+        + '<span class="tog-btn" id="' + rid + '-tbtn">\u25B6</span></td>'
+        + '<td class="party-name-cell">' + p.name + '</td>'
+        + '<td style="color:#64748b;font-size:12px;">' + p.state + '</td>'
+        + '<td style="color:#94a3b8;font-size:12px;font-family:monospace;">' + (p.pincode || '\u2014') + '</td>'
+        + '<td class="right ' + bucket.amtCls + '">' + fINR(p.outstanding) + '</td>'
+        + '<td class="right" style="color:#64748b;">' + p.bill_count + '</td>'
+        + '<td class="right"><span class="overdue-badge ' + ovClass(p.max_days) + '">'
+        + (p.max_days === 0 ? 'Current' : p.max_days + 'd')
+        + '</span></td>'
+        + '</tr>';
+
+      html += '<tr class="detail-row" id="' + did + '" style="display:none;" data-group="' + gid + '">'
+        + '<td colspan="7">'
+        + '<div class="sub-table-wrap">'
+        + '<table class="sub-table"><thead><tr>'
+        + '<th class="sub-date">Bill Date</th>'
+        + '<th class="sub-ref">Ref No</th>'
+        + '<th class="sub-amt right">Pending (\u20B9)</th>'
+        + '<th class="sub-gap"></th>'
+        + '<th class="sub-due">Due On</th>'
+        + '<th class="sub-ov right">Overdue</th>'
+        + '</tr></thead><tbody>';
+
+      p.bills.forEach(function(b) {
+        var ovLabel = b.overdue === 0 ? 'Not due' : b.overdue + ' days';
+        html += '<tr>'
+          + '<td class="sub-date">' + b.date + '</td>'
+          + '<td class="sub-ref">' + b.ref + '</td>'
+          + '<td class="sub-amt right" style="font-weight:600;">' + fINR(b.amt) + '</td>'
+          + '<td class="sub-gap"></td>'
+          + '<td class="sub-due">' + b.due + '</td>'
+          + '<td class="sub-ov right"><span class="overdue-badge ' + ovClass(b.overdue) + '">' + ovLabel + '</span></td>'
+          + '</tr>';
+      });
+
+      html += '</tbody></table></div></td></tr>';
+    });
+  });
+
+  tbody.innerHTML = html;
+})();
+
+function toggleGroup(gid) {
+  var allRows = document.querySelectorAll('[data-group="' + gid + '"]');
+  var arrow = document.getElementById(gid + '-arrow');
+  // determine current state by checking first party row visibility
+  var firstParty = document.querySelector('[data-group="' + gid + '"].party-row');
+  var isCollapsed = firstParty ? firstParty.style.display === 'none' : false;
+
+  allRows.forEach(function(r) {
+    if (r.classList.contains('detail-row')) {
+      r.style.display = 'none';
+    } else {
+      r.style.display = isCollapsed ? '' : 'none';
+    }
+  });
+  // reset all toggle pills to closed state
+  document.querySelectorAll('[data-group="' + gid + '"].party-row').forEach(function(r) {
+    var btn = document.getElementById(r.id + '-tbtn');
+    if (btn) { btn.textContent = '\u25B6'; btn.classList.remove('open'); }
+  });
+  if (arrow) arrow.innerHTML = isCollapsed ? '\u25BC' : '\u25B6';
+}
+
+function toggleDetail(did, rid, event) {
+  if (event) event.stopPropagation();
+  var det = document.getElementById(did);
+  var btn = document.getElementById(rid + '-tbtn');
+  if (!det) return;
+  var open = det.style.display !== 'none';
+  det.style.display = open ? 'none' : '';
+  if (btn) {
+    btn.textContent = open ? '\u25B6' : '\u25BC';
+    btn.classList.toggle('open', !open);
+  }
+}
+
+/* =====================================================
+   SEARCH FILTER
+===================================================== */
+function filterTable() {
+  var q = document.getElementById('searchInput').value.toLowerCase();
+  var rows = document.querySelectorAll('#partyTableBody tr.party-row');
+
+  rows.forEach(function(row) {
+    var text = row.textContent.toLowerCase();
+    var detId = row.id.replace('_r', '_d');
+    var det = document.getElementById(detId);
+    var show = !q || text.indexOf(q) !== -1;
+    row.style.display = show ? '' : 'none';
+    if (!show && det) det.style.display = 'none';
+  });
+
+  // Show/hide group headers based on whether they have visible children
+  var groupVisible = {};
+  document.querySelectorAll('#partyTableBody tr.party-row').forEach(function(row) {
+    var g = row.dataset.group;
+    if (!groupVisible[g]) groupVisible[g] = false;
+    if (row.style.display !== 'none') groupVisible[g] = true;
+  });
+  document.querySelectorAll('#partyTableBody tr.group-header-row').forEach(function(row) {
+    var onclick = row.getAttribute('onclick') || '';
+    var m = onclick.match(/toggleGroup\('([^']+)'\)/);
+    if (m) row.style.display = groupVisible[m[1]] ? '' : 'none';
+  });
+}
+
+/* =====================================================
+   BACK TO TOP
+===================================================== */
+var backTopBtn = document.getElementById('backTop');
+window.addEventListener('scroll', function() {
+  if (window.scrollY > window.innerHeight) {
+    backTopBtn.classList.add('visible');
+  } else {
+    backTopBtn.classList.remove('visible');
+  }
+}, { passive: true });
+</script>
+</body>
+</html>

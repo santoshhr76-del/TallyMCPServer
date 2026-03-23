@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tallyprime-mcp"
+version = "0.1.0"
+description = "MCP server exposing TallyPrime accounting operations as AI tools"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Santosh", email = "santoshhr76@gmail.com" }]
+
+dependencies = [
+    # MCP SDK
+    "mcp>=1.0.0",
+    # HTTP client (async-compatible, used for Tally XML gateway)
+    "httpx>=0.27.0",
+    # Cloud/HTTP server dependencies
+    "uvicorn[standard]>=0.30.0",
+    "starlette>=0.40.0",
+]
+
+[project.scripts]
+# stdio mode (for local Claude Desktop)
+tallyprime-mcp = "tallyprime_mcp.server:main"
+# HTTP/SSE mode (for cloud deployment)
+tallyprime-mcp-http = "tallyprime_mcp.server_http:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tallyprime_mcp"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

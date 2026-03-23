@@ -1,0 +1,12 @@
+# Receivables Dashboard Pipeline — Python dependencies
+
+# Claude Agent SDK (includes Claude Code CLI)
+claude-agent-sdk>=0.1.48
+
+# TallyPrime MCP server — install from the parent folder:
+#   pip install -e ..
+# Or if published to PyPI:
+#   pip install tallyprime-mcp
+
+# Environment variable management
+python-dotenv>=1.0.0

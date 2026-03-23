@@ -1,0 +1,8 @@
+# Web Data Processing Pipeline — Python dependencies
+# Install with: pip install -r requirements.txt
+
+# Core: Claude Agent SDK (includes Claude Code CLI automatically)
+claude-agent-sdk>=0.1.48
+
+# Environment variable management
+python-dotenv>=1.0.0

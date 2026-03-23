@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Live data files (regenerated every pipeline run)
+output/receivables.json
+output/party_details.json
+output/map_data.json
+output/receivables_raw.txt
+
+# Environment
+.env
+*.log
