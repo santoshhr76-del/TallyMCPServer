@@ -18,9 +18,10 @@ WORKDIR /app
 # (src/ must exist before pip install -e . so the package is registered)
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
+COPY pwa/ ./pwa/
 
 # Install all dependencies + the tallyprime_mcp package itself
-RUN pip install --no-cache-dir mcp httpx "uvicorn[standard]" starlette \
+RUN pip install --no-cache-dir mcp httpx "uvicorn[standard]" starlette anthropic \
  && pip install --no-cache-dir -e .
 
 # ── runtime config (override via -e flags or Cloud Run env vars) ─
