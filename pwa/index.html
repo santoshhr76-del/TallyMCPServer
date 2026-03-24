@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1565C0">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Tally AI">
+  <title>TallyPrime Assistant</title>
+
+  <!-- Inline PWA manifest -->
+  <link rel="manifest" href="data:application/manifest+json,{
+    &quot;name&quot;:&quot;TallyPrime Assistant&quot;,
+    &quot;short_name&quot;:&quot;Tally AI&quot;,
+    &quot;start_url&quot;:&quot;/app&quot;,
+    &quot;display&quot;:&quot;standalone&quot;,
+    &quot;background_color&quot;:&quot;#F5F7FA&quot;,
+    &quot;theme_color&quot;:&quot;#1565C0&quot;,
+    &quot;icons&quot;:[{&quot;src&quot;:&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%231565C0' rx='20'/%3E%3Ctext y='.9em' font-size='80' x='10'%3E📊%3C/text%3E%3C/svg%3E&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/svg+xml&quot;}]
+  }">
+
+  <style>
+    /* ── Reset & Base ───────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #1565C0;
+      --primary-dark: #0D47A1;
+      --primary-light: #E3F2FD;
+      --surface: #FFFFFF;
+      --bg: #F5F7FA;
+      --text: #1A1A2E;
+      --text-muted: #6B7280;
+      --border: #E5E7EB;
+      --user-bubble: #1565C0;
+      --user-text: #FFFFFF;
+      --bot-bubble: #FFFFFF;
+      --bot-text: #1A1A2E;
+      --shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08);
+      --radius: 18px;
+      --header-h: 64px;
+      --input-h: 72px;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    html, body {
+      height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── Layout shell ───────────────────────────────────────── */
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      max-width: 640px;
+      margin: 0 auto;
+      position: relative;
+    }
+
+    /* ── Header ────────────────────────────────────────────── */
+    #header {
+      height: var(--header-h);
+      background: var(--primary);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      flex-shrink: 0;
+      z-index: 10;
+    }
+
+    #header-icon {
+      width: 40px; height: 40px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    #header-text { flex: 1; min-width: 0; }
+    #header-title { color: #fff; font-size: 17px; font-weight: 700; line-height: 1.2; }
+    #header-sub   { color: rgba(255,255,255,0.75); font-size: 12px; margin-top: 1px;
+                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    #settings-btn {
+      background: transparent; border: none; cursor: pointer;
+      color: rgba(255,255,255,0.9); font-size: 22px; padding: 8px;
+      border-radius: 50%; transition: background 0.2s;
+    }
+    #settings-btn:hover { background: rgba(255,255,255,0.15); }
+
+    /* ── Chat area ──────────────────────────────────────────── */
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* ── Message bubbles ────────────────────────────────────── */
+    .msg-row {
+      display: flex;
+      flex-direction: column;
+      max-width: 82%;
+    }
+    .msg-row.user { align-self: flex-end; align-items: flex-end; }
+    .msg-row.bot  { align-self: flex-start; align-items: flex-start; }
+
+    .bubble {
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      line-height: 1.55;
+      font-size: 15px;
+      word-break: break-word;
+      box-shadow: var(--shadow);
+      position: relative;
+    }
+
+    .msg-row.user .bubble {
+      background: var(--user-bubble);
+      color: var(--user-text);
+      border-bottom-right-radius: 4px;
+    }
+
+    .msg-row.bot .bubble {
+      background: var(--bot-bubble);
+      color: var(--bot-text);
+      border-bottom-left-radius: 4px;
+    }
+
+    .msg-time {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 3px;
+      padding: 0 4px;
+    }
+
+    /* Markdown-ish rendering in bot bubbles */
+    .bubble strong { font-weight: 700; }
+    .bubble em     { font-style: italic; }
+    .bubble code   { font-family: 'SF Mono', Menlo, monospace; font-size: 13px;
+                     background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 4px; }
+    .bubble pre    { background: rgba(0,0,0,0.06); padding: 10px; border-radius: 8px;
+                     overflow-x: auto; margin: 6px 0; font-size: 13px; }
+    .bubble ul, .bubble ol { padding-left: 20px; margin: 4px 0; }
+    .bubble li     { margin: 2px 0; }
+    .bubble h3, .bubble h4 { font-weight: 700; margin: 8px 0 4px; }
+    .bubble table  { border-collapse: collapse; font-size: 13px; width: 100%; margin: 6px 0; }
+    .bubble th     { background: var(--primary-light); font-weight: 700; padding: 6px 8px;
+                     text-align: left; border: 1px solid var(--border); }
+    .bubble td     { padding: 5px 8px; border: 1px solid var(--border); }
+    .bubble tr:nth-child(even) td { background: #FAFAFA; }
+    .bubble a      { color: var(--primary); text-decoration: underline; }
+    .bubble hr     { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+
+    /* ── Tool indicator ─────────────────────────────────────── */
+    .tool-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2px 9px;
+      margin-top: 4px;
+    }
+    .tool-badge-icon { font-size: 12px; }
+
+    /* ── Typing indicator ───────────────────────────────────── */
+    #typing {
+      display: none;
+      align-self: flex-start;
+      align-items: center;
+      gap: 4px;
+      padding: 10px 14px;
+      background: var(--bot-bubble);
+      border-radius: var(--radius);
+      border-bottom-left-radius: 4px;
+      box-shadow: var(--shadow);
+      margin: 0 0 4px;
+    }
+    #typing.visible { display: flex; }
+    .dot {
+      width: 8px; height: 8px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      animation: bounce 1.4s ease-in-out infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30%            { transform: translateY(-6px); }
+    }
+
+    #typing-text {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-left: 4px;
+      font-style: italic;
+    }
+
+    /* ── Input bar ──────────────────────────────────────────── */
+    #input-bar {
+      height: calc(var(--input-h) + var(--safe-bottom));
+      padding: 12px 12px calc(12px + var(--safe-bottom));
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    #msg-input {
+      flex: 1;
+      min-height: 44px;
+      max-height: 120px;
+      padding: 10px 16px;
+      border: 1.5px solid var(--border);
+      border-radius: 24px;
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      resize: none;
+      line-height: 1.5;
+      transition: border-color 0.2s;
+      background: var(--bg);
+    }
+    #msg-input:focus { border-color: var(--primary); }
+    #msg-input::placeholder { color: var(--text-muted); }
+
+    #send-btn {
+      width: 46px; height: 46px;
+      background: var(--primary);
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.2s, transform 0.1s;
+      box-shadow: 0 2px 8px rgba(21,101,192,0.4);
+    }
+    #send-btn:hover  { background: var(--primary-dark); }
+    #send-btn:active { transform: scale(0.93); }
+    #send-btn:disabled { background: var(--border); box-shadow: none; cursor: not-allowed; }
+
+    #send-btn svg { width: 20px; height: 20px; fill: white; }
+
+    /* ── Settings overlay ───────────────────────────────────── */
+    #settings-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 100;
+      align-items: flex-end;
+    }
+    #settings-overlay.open { display: flex; }
+
+    #settings-sheet {
+      background: var(--surface);
+      border-radius: 24px 24px 0 0;
+      width: 100%;
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 24px 20px calc(24px + var(--safe-bottom));
+      animation: slideUp 0.3s ease;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to   { transform: translateY(0); }
+    }
+
+    .settings-handle {
+      width: 40px; height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      margin: 0 auto 20px;
+    }
+
+    .settings-title {
+      font-size: 18px; font-weight: 700; margin-bottom: 20px; color: var(--text);
+    }
+
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600;
+                        color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .form-group input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus { border-color: var(--primary); }
+    .form-hint { font-size: 12px; color: var(--text-muted); margin-top: 5px; }
+
+    #save-btn {
+      width: 100%;
+      padding: 14px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: background 0.2s;
+    }
+    #save-btn:hover { background: var(--primary-dark); }
+
+    #clear-btn {
+      width: 100%;
+      padding: 12px;
+      background: transparent;
+      color: #EF4444;
+      border: 1.5px solid #EF4444;
+      border-radius: 14px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: background 0.2s;
+    }
+    #clear-btn:hover { background: #FEF2F2; }
+
+    /* ── Setup screen ───────────────────────────────────────── */
+    #setup-screen {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: var(--primary);
+      z-index: 200;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 24px;
+    }
+    #setup-screen.open { display: flex; }
+
+    .setup-logo { font-size: 64px; margin-bottom: 16px; }
+    .setup-title { color: white; font-size: 26px; font-weight: 800; margin-bottom: 8px; text-align: center; }
+    .setup-sub   { color: rgba(255,255,255,0.75); font-size: 15px; margin-bottom: 36px; text-align: center; }
+
+    .setup-card {
+      background: white;
+      border-radius: 20px;
+      padding: 24px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+
+    .setup-card .form-group label { color: var(--text-muted); }
+
+    #setup-btn {
+      width: 100%;
+      padding: 14px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+
+    /* ── Scrollbar ──────────────────────────────────────────── */
+    #chat::-webkit-scrollbar { width: 4px; }
+    #chat::-webkit-scrollbar-track { background: transparent; }
+    #chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── Suggestion chips ───────────────────────────────────── */
+    #suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 0 12px 12px;
+    }
+    .chip {
+      background: var(--surface);
+      border: 1.5px solid var(--primary);
+      color: var(--primary);
+      border-radius: 20px;
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .chip:hover { background: var(--primary-light); }
+  </style>
+</head>
+<body>
+
+<!-- ── Setup screen (first launch) ────────────────────────── -->
+<div id="setup-screen">
+  <div class="setup-logo">📊</div>
+  <div class="setup-title">TallyPrime Assistant</div>
+  <div class="setup-sub">Your AI-powered accounting companion</div>
+  <div class="setup-card">
+    <div class="form-group">
+      <label>Server URL</label>
+      <input id="setup-url" type="url" placeholder="https://tallyprime-mcp-...run.app">
+      <div class="form-hint">Your deployed TallyPrime MCP server URL</div>
+    </div>
+    <div class="form-group">
+      <label>API Key (Bearer Token)</label>
+      <input id="setup-key" type="password" placeholder="Your bearer token">
+      <div class="form-hint">Leave blank if no auth is configured</div>
+    </div>
+    <button id="setup-btn" onclick="saveSetup()">Connect to TallyPrime →</button>
+  </div>
+</div>
+
+<!-- ── Main app ────────────────────────────────────────────── -->
+<div id="app">
+
+  <!-- Header -->
+  <div id="header">
+    <div id="header-icon">📊</div>
+    <div id="header-text">
+      <div id="header-title">TallyPrime Assistant</div>
+      <div id="header-sub">Connecting…</div>
+    </div>
+    <button id="settings-btn" onclick="openSettings()" title="Settings">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+        <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.92c.04-.34.07-.69.07-1.08s-.03-.73-.07-1.08l2.33-1.82c.21-.16.27-.46.12-.7l-2.21-3.82c-.14-.25-.43-.33-.68-.25l-2.75 1.1c-.57-.44-1.18-.81-1.84-1.08l-.42-2.93A.56.56 0 0 0 14 2h-4c-.27 0-.5.2-.54.46l-.42 2.93c-.66.27-1.27.64-1.84 1.08l-2.75-1.1c-.25-.1-.54 0-.68.25L1.56 9.44c-.15.24-.09.54.12.7l2.33 1.82c-.04.35-.07.7-.07 1.08s.03.73.07 1.08L1.68 15.94c-.21.16-.27.46-.12.7l2.21 3.82c.14.25.43.33.68.25l2.75-1.1c.57.44 1.18.81 1.84 1.08l.42 2.93c.04.26.27.46.54.46h4c.27 0 .5-.2.54-.46l.42-2.93c.66-.27 1.27-.64 1.84-1.08l2.75 1.1c.25.1.54 0 .68-.25l2.21-3.82c.15-.24.09-.54-.12-.7l-2.33-1.82z"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Chat messages -->
+  <div id="chat">
+    <!-- Welcome message injected by JS -->
+  </div>
+
+  <!-- Typing indicator -->
+  <div id="typing">
+    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    <span id="typing-text">Thinking…</span>
+  </div>
+
+  <!-- Quick suggestions (shown initially) -->
+  <div id="suggestions">
+    <div class="chip" onclick="sendChip(this)">📋 Active company</div>
+    <div class="chip" onclick="sendChip(this)">💰 Outstanding receivables</div>
+    <div class="chip" onclick="sendChip(this)">📈 Profit &amp; Loss this year</div>
+    <div class="chip" onclick="sendChip(this)">📒 Today's day book</div>
+    <div class="chip" onclick="sendChip(this)">⚖️ Balance sheet</div>
+    <div class="chip" onclick="sendChip(this)">🔍 Find a ledger</div>
+  </div>
+
+  <!-- Input bar -->
+  <div id="input-bar">
+    <textarea id="msg-input"
+              rows="1"
+              placeholder="Ask about balances, reports, vouchers…"
+              onkeydown="handleKey(event)"
+              oninput="autoResize(this)"></textarea>
+    <button id="send-btn" onclick="sendMessage()" title="Send">
+      <svg viewBox="0 0 24 24">
+        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- ── Settings sheet ──────────────────────────────────────── -->
+<div id="settings-overlay" onclick="overlayClick(event)">
+  <div id="settings-sheet">
+    <div class="settings-handle"></div>
+    <div class="settings-title">⚙️ Settings</div>
+
+    <div class="form-group">
+      <label>Server URL</label>
+      <input id="cfg-url" type="url" placeholder="https://your-server.run.app">
+    </div>
+    <div class="form-group">
+      <label>API Key (Bearer Token)</label>
+      <input id="cfg-key" type="password" placeholder="Leave blank if no auth">
+    </div>
+
+    <button id="save-btn" onclick="saveSettings()">Save Settings</button>
+    <button id="clear-btn" onclick="clearHistory()">🗑 Clear Chat History</button>
+  </div>
+</div>
+
+<!-- ── JavaScript ──────────────────────────────────────────── -->
+<script>
+// ── Config (in-memory, no localStorage) ─────────────────────
+const CFG = {
+  serverUrl:   'https://tallyprime-mcp-mqup2h4wzq-el.a.run.app',
+  bearerToken: '683c7073861d17e874043e5cb39436cd1a6e8e5a421fdf0e02e7cc46c2bd02dd',
+};
+
+// Chat history — text-only [{role, content}]
+let history = [];
+let isLoading = false;
+
+// ── Boot ─────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  if (!CFG.serverUrl) {
+    showSetup();
+  } else {
+    init();
+  }
+});
+
+function init() {
+  addBotMessage(
+    "👋 Hi! I'm your **TallyPrime Assistant**.\n\n" +
+    "I can help you:\n" +
+    "- 📊 Query ledger balances and details\n" +
+    "- 📈 View reports (P&L, Balance Sheet, Trial Balance, Day Book)\n" +
+    "- 💰 Check outstanding receivables\n" +
+    "- 🧾 Create Sales, Payment & Receipt vouchers\n\n" +
+    "What would you like to know?"
+  );
+  fetchCompany();
+}
+
+async function fetchCompany() {
+  try {
+    const res = await chatAPI('What is the active company name? Reply with just the company name in one line, nothing else.');
+    const name = res.response.trim().split('\n')[0].replace(/\*+/g, '').trim();
+    document.getElementById('header-sub').textContent = name || 'Connected';
+    // Remove the welcome query from history so it doesn't clutter context
+    history = [];
+  } catch {
+    document.getElementById('header-sub').textContent = 'TallyPrime';
+  }
+}
+
+// ── Setup screen ─────────────────────────────────────────────
+function showSetup() {
+  document.getElementById('setup-screen').classList.add('open');
+  document.getElementById('setup-url').value = CFG.serverUrl || '';
+  document.getElementById('setup-key').value = CFG.bearerToken || '';
+}
+
+function saveSetup() {
+  const url = document.getElementById('setup-url').value.trim().replace(/\/$/, '');
+  const key = document.getElementById('setup-key').value.trim();
+  if (!url) { alert('Please enter the server URL'); return; }
+  CFG.serverUrl   = url;
+  CFG.bearerToken = key;
+  document.getElementById('setup-screen').classList.remove('open');
+  init();
+}
+
+// ── Settings sheet ───────────────────────────────────────────
+function openSettings() {
+  document.getElementById('cfg-url').value = CFG.serverUrl;
+  document.getElementById('cfg-key').value = CFG.bearerToken;
+  document.getElementById('settings-overlay').classList.add('open');
+}
+
+function overlayClick(e) {
+  if (e.target === document.getElementById('settings-overlay')) closeSettings();
+}
+
+function closeSettings() {
+  document.getElementById('settings-overlay').classList.remove('open');
+}
+
+function saveSettings() {
+  const url = document.getElementById('cfg-url').value.trim().replace(/\/$/, '');
+  const key = document.getElementById('cfg-key').value.trim();
+  if (!url) { alert('Server URL is required'); return; }
+  CFG.serverUrl   = url;
+  CFG.bearerToken = key;
+  closeSettings();
+  showToast('Settings saved ✓');
+}
+
+function clearHistory() {
+  history = [];
+  document.getElementById('chat').innerHTML = '';
+  closeSettings();
+  addBotMessage('Chat cleared. How can I help you?');
+  showToast('Chat history cleared');
+}
+
+// ── Message sending ──────────────────────────────────────────
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function sendChip(el) {
+  const text = el.textContent.replace(/^[\p{Emoji}\s]+/u, '').trim();
+  document.getElementById('msg-input').value = text;
+  hideSuggestions();
+  sendMessage();
+}
+
+function hideSuggestions() {
+  const s = document.getElementById('suggestions');
+  if (s) { s.style.display = 'none'; }
+}
+
+async function sendMessage() {
+  if (isLoading) return;
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  hideSuggestions();
+  input.value = '';
+  input.style.height = 'auto';
+
+  addUserMessage(text);
+  setLoading(true, 'Thinking…');
+
+  try {
+    const data = await chatAPI(text, history);
+    const toolsMsg = data.tools_used && data.tools_used.length
+      ? formatToolsUsed(data.tools_used)
+      : null;
+    addBotMessage(data.response, toolsMsg);
+    history = data.history || history;
+  } catch (err) {
+    addBotMessage(`⚠️ **Error**: ${err.message}\n\nPlease check your connection and settings.`);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function chatAPI(message, hist = []) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (CFG.bearerToken) headers['Authorization'] = `Bearer ${CFG.bearerToken}`;
+
+  const res = await fetch(`${CFG.serverUrl}/chat`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ message, history: hist }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ── Tool name → friendly label ───────────────────────────────
+const TOOL_LABELS = {
+  get_active_company:         '🏢 Fetched company info',
+  get_all_ledgers:            '📋 Fetched all ledgers',
+  get_ledger:                 '🔍 Looked up ledger',
+  get_vouchers:               '🧾 Fetched vouchers',
+  get_trial_balance:          '⚖️ Fetched trial balance',
+  get_balance_sheet:          '📊 Fetched balance sheet',
+  get_profit_loss:            '📈 Fetched P&L statement',
+  get_daybook:                '📒 Fetched day book',
+  get_outstanding_receivables:'💰 Fetched receivables',
+  create_sales_voucher:       '✅ Created sales voucher',
+  create_payment_voucher:     '✅ Created payment voucher',
+  create_receipt_voucher:     '✅ Created receipt voucher',
+};
+
+function formatToolsUsed(tools) {
+  const unique = [...new Set(tools)];
+  return unique.map(t => TOOL_LABELS[t] || `🔧 ${t}`).join(' · ');
+}
+
+// ── DOM helpers ──────────────────────────────────────────────
+function addUserMessage(text) {
+  const chat = document.getElementById('chat');
+  const row = document.createElement('div');
+  row.className = 'msg-row user';
+  row.innerHTML = `
+    <div class="bubble">${escapeHtml(text)}</div>
+    <div class="msg-time">${timeNow()}</div>
+  `;
+  chat.appendChild(row);
+  scrollDown();
+}
+
+function addBotMessage(text, toolsLabel) {
+  const chat = document.getElementById('chat');
+  const row = document.createElement('div');
+  row.className = 'msg-row bot';
+
+  let toolsHtml = '';
+  if (toolsLabel) {
+    toolsHtml = `<div class="tool-badge"><span class="tool-badge-icon">⚡</span>${escapeHtml(toolsLabel)}</div>`;
+  }
+
+  row.innerHTML = `
+    <div class="bubble">${renderMarkdown(text)}</div>
+    ${toolsHtml}
+    <div class="msg-time">${timeNow()}</div>
+  `;
+  chat.appendChild(row);
+  scrollDown();
+}
+
+function setLoading(active, status) {
+  isLoading = active;
+  const typing = document.getElementById('typing');
+  const btn    = document.getElementById('send-btn');
+  const txt    = document.getElementById('typing-text');
+  if (active) {
+    txt.textContent = status || 'Thinking…';
+    typing.classList.add('visible');
+    btn.disabled = true;
+    scrollDown();
+  } else {
+    typing.classList.remove('visible');
+    btn.disabled = false;
+  }
+}
+
+function scrollDown() {
+  requestAnimationFrame(() => {
+    const chat = document.getElementById('chat');
+    chat.scrollTop = chat.scrollHeight;
+  });
+}
+
+function timeNow() {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  Object.assign(t.style, {
+    position: 'fixed', bottom: '90px', left: '50%', transform: 'translateX(-50%)',
+    background: '#323232', color: 'white', padding: '10px 20px', borderRadius: '24px',
+    fontSize: '14px', zIndex: '999', boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+  });
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2500);
+}
+
+// ── Minimal markdown renderer ────────────────────────────────
+function renderMarkdown(md) {
+  if (!md) return '';
+  let html = escapeHtml(md);
+
+  // Code blocks (``` ... ```)
+  html = html.replace(/```[\w]*\n?([\s\S]*?)```/g,
+    (_, code) => `<pre><code>${code.trim()}</code></pre>`);
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Bold
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+
+  // Italic
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+  // Headers
+  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^### (.+)$/gm,  '<h3>$1</h3>');
+
+  // Horizontal rule
+  html = html.replace(/^---+$/gm, '<hr>');
+
+  // Unordered list lines
+  html = html.replace(/^[•\-\*] (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+
+  // Ordered list lines
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  // Paragraphs — double newline
+  html = html.replace(/\n{2,}/g, '</p><p>');
+  // Single newlines
+  html = html.replace(/\n/g, '<br>');
+
+  return `<p>${html}</p>`;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>

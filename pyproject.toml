@@ -19,6 +19,8 @@ dependencies = [
     # Cloud/HTTP server dependencies
     "uvicorn[standard]>=0.30.0",
     "starlette>=0.40.0",
+    # AI chat endpoint
+    "anthropic>=0.40.0",
 ]
 
 [project.scripts]
