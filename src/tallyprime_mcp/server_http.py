@@ -221,7 +221,7 @@ TALLY_TOOLS = [
             "required": [],
         },
     },
-{
+    {
         "name": "create_sales_voucher",
         "description": (
             "Create a Sales invoice in TallyPrime with a single line item. "
@@ -372,7 +372,7 @@ def execute_tally_tool(name: str, args: dict[str, Any]) -> Any:
                 tally_url=tally_url,
             )
 
-elif name == "create_sales_voucher":
+        elif name == "create_sales_voucher":
             return tc.create_sales_voucher(
                 date=args["date"],
                 party_ledger=args["party_ledger"],
@@ -545,8 +545,9 @@ starlette_app = Starlette(
         Route("/health",   health,          methods=["GET"]),
         Route("/app",      handle_app,      methods=["GET"]),
         Route("/chat",     handle_chat,     methods=["POST"]),
-        Mount("/sse",      app=handle_sse),
-        Mount("/messages", app=sse_transport.handle_post_message),
+        Mount("/sse/messages", app=sse_transport.handle_post_message),
+        Mount("/sse",          app=handle_sse),
+        Mount("/messages",     app=sse_transport.handle_post_message),
     ],
     middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])],
 )

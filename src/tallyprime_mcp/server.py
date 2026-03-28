@@ -474,7 +474,7 @@ async def list_tools() -> list[types.Tool]:
                 "required": [],
             },
         ),
-types.Tool(
+        types.Tool(
             name="create_sales_voucher",
             description=(
                 "Create a Sales (invoice) voucher in TallyPrime with a single line item. "
@@ -966,7 +966,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
                     tally_url=_url(arguments),
                 ))
 
-           case "create_sales_voucher":
+            case "create_sales_voucher":
                 raw_extra = _parse_array_arg(arguments.get("additional_ledgers", []))
                 return _ok(tc.create_sales_voucher(
                     date=arguments["date"],
