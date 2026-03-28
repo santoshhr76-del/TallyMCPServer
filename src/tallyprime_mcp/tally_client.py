@@ -1603,17 +1603,25 @@ def _build_inventory_entry(
 def create_sales_voucher(
     date: str,
     party_ledger: str,
-    items: list[dict[str, Any]],
-    voucher_type: str = "Sales",
-    voucher_number: str = "",
-    narration: str = "",
-    # ── GST ledgers (voucher-level) ───────────────────────────────────────────
+    # ── Single line-item fields (flat — one item per call) ─────────────────────
+    stock_item_name: str = "",
+    sales_ledger: str = "",
+    quantity: float = 0.0,
+    unit: str = "",
+    item_rate: float = 0.0,
+    amount: float = 0.0,
+    # ── GST fields (separate from line item) ───────────────────────────────────
+    gst_rate: float = 0.0,
     cgst_ledger: str = "",
     cgst_amount: float = 0.0,
     sgst_ledger: str = "",
     sgst_amount: float = 0.0,
     igst_ledger: str = "",
     igst_amount: float = 0.0,
+    # ── Voucher-level fields ───────────────────────────────────────────────────
+    voucher_type: str = "Sales",
+    voucher_number: str = "",
+    narration: str = "",
     # ── Additional voucher-level ledgers (Freight, Insurance, Discount, etc.) ─
     additional_ledgers: list[dict[str, Any]] | None = None,
     # ── GST header fields ─────────────────────────────────────────────────────
@@ -1626,22 +1634,35 @@ def create_sales_voucher(
     """
     Create a Sales (invoice) voucher in TallyPrime.
 
-    items: list of dicts, each with:
-        stock_item_name  (str, required)
-        sales_ledger     (str, required) — per-item sales/income ledger
-        amount           (float, required) — GROSS line amount before discount
-        rate             (float, optional)
-        quantity         (float, optional)
-        unit             (str, optional)
-        gst_rate         (float, optional) — per-line GST % (e.g. 5, 12, 18, 28; 0 if exempt)
-        discount_percent (float, optional) — used when discount_amount absent
-        discount_amount  (float, optional) — takes priority over discount_percent
+    Accepts a single line item as flat fields (one item per tool call):
+        stock_item_name  (str, required) — product name as in TallyPrime
+        sales_ledger     (str, required) — income ledger to credit
+        quantity         (float) — item quantity
+        unit             (str) — unit of measure (e.g. 'Nos', 'Kg')
+        item_rate        (float) — price per unit
+        amount           (float) — net line amount (post-discount, pre-tax)
+
+    GST fields (separate):
+        gst_rate         (float) — GST % for this item (e.g. 5, 12, 18, 28; 0 if exempt)
+        cgst_ledger/cgst_amount  — CGST output ledger and amount (intrastate)
+        sgst_ledger/sgst_amount  — SGST output ledger and amount (intrastate)
+        igst_ledger/igst_amount  — IGST output ledger and amount (interstate)
 
     additional_ledgers: list of dicts with ledger_name, amount, is_addition (True=charge, False=deduction).
-    cgst_ledger/sgst_ledger/igst_ledger: voucher-level GST output ledgers.
-    Party debit = sum(net item amounts) + additions - deductions + GST.
+    Party debit = net item amount + additions - deductions + GST.
     """
-    item_list = items or []
+    # Build a single-item list from the flat fields
+    item_list = []
+    if stock_item_name:
+        item_list.append({
+            "stock_item_name": stock_item_name,
+            "sales_ledger": sales_ledger,
+            "amount": amount,
+            "rate": item_rate,
+            "quantity": quantity,
+            "unit": unit,
+            "gst_rate": gst_rate,
+        })
 
     # ── Normalise additional ledgers ──────────────────────────────────────────
     extra_ledgers = additional_ledgers or []

@@ -474,21 +474,19 @@ async def list_tools() -> list[types.Tool]:
                 "required": [],
             },
         ),
-        types.Tool(
+types.Tool(
             name="create_sales_voucher",
             description=(
-                "Create a Sales (invoice) voucher in TallyPrime. "
-                "Supports multiple inventory lines, each with its own sales ledger. "
-                "Always ask for: date, party_ledger, voucher_type, and line_items array. "
-                "Each entry in line_items needs: stock_item_name, sales_ledger, amount (gross pre-discount), "
-                "rate, quantity, unit, gst_rate (per-line GST %, e.g. 18). "
-                "Item-level discount: discount_percent (% of gross) OR discount_amount (fixed); "
-                "when both given, discount_amount wins and discount_percent is ignored. "
-                "GST ledgers are voucher-level: cgst_ledger + cgst_amount + sgst_ledger + sgst_amount (intrastate) "
+                "Create a Sales (invoice) voucher in TallyPrime with a single line item. "
+                "Pass item details as flat fields: stock_item_name, sales_ledger, quantity, unit, item_rate, amount. "
+                "GST fields are separate: gst_rate (item-level GST %), plus voucher-level GST ledgers — "
+                "cgst_ledger + cgst_amount + sgst_ledger + sgst_amount (intrastate) "
                 "OR igst_ledger + igst_amount (interstate). "
                 "For additional charges/deductions (Freight, Insurance, Discount, Round-off) use "
                 "additional_ledgers array: ledger_name, amount, is_addition (true=charge, false=deduction). "
-                "Party debit = sum(net item amounts) + additions - deductions + GST."
+                "Party debit = net item amount + additions - deductions + GST. "
+                "For multi-item invoices, call this tool once per line item. "
+                "ALWAYS confirm details with the user before calling this tool."
             ),
             inputSchema={
                 "type": "object",
@@ -498,23 +496,22 @@ async def list_tools() -> list[types.Tool]:
                     "voucher_type": {"type": "string", "description": "Voucher type name as configured in TallyPrime, e.g. 'Sales', 'Tax Invoice'", "default": "Sales"},
                     "voucher_number": {"type": "string", "description": "Invoice / voucher number (optional)", "default": ""},
                     "narration": {"type": "string", "description": "Narration or remarks (optional)", "default": ""},
-                    "line_items": {
-                        "description": (
-                            "JSON array of inventory line objects (pass as a real array, not a string). "
-                            "All values are mapped directly to the Tally voucher XML — no recomputation. "
-                            "Each object must have: "
-                            "stock_item_name (string, exact name in TallyPrime), "
-                            "sales_ledger (string, income ledger to credit for this line), "
-                            "amount (number, NET line amount after any discount — mapped as-is to <AMOUNT>), "
-                            "rate (number, rate per unit — mapped as-is to <RATE>), "
-                            "quantity (number), "
-                            "unit (string, e.g. 'Nos', 'Kg'), "
-                            "gst_rate (number, GST % for this line e.g. 5, 12, 18, 28). "
-                            "Optional discount fields mapped directly: "
-                            "discount_percent → <DISCOUNT>, discount_amount → <DISCOUNTAMOUNT>."
-                        ),
-                        "default": [],
-                    },
+                    # ── Single line-item fields (flat) ─────────────────────
+                    "stock_item_name": {"type": "string", "description": "Product/stock item name exactly as in TallyPrime"},
+                    "sales_ledger": {"type": "string", "description": "Income/sales ledger to credit for this item"},
+                    "quantity": {"type": "number", "description": "Item quantity"},
+                    "unit": {"type": "string", "description": "Unit of measure, e.g. 'Nos', 'Kg', 'Ltrs'"},
+                    "item_rate": {"type": "number", "description": "Price per unit"},
+                    "amount": {"type": "number", "description": "Net line amount (post-discount, pre-tax)"},
+                    # ── GST fields (separate) ──────────────────────────────
+                    "gst_rate": {"type": "number", "description": "GST percentage for this item, e.g. 5, 12, 18, 28 (0 if exempt)", "default": 0},
+                    "cgst_ledger": {"type": "string", "description": "CGST output tax ledger name (intrastate)", "default": ""},
+                    "cgst_amount": {"type": "number", "description": "Total CGST tax amount for the invoice", "default": 0},
+                    "sgst_ledger": {"type": "string", "description": "SGST/UTGST output tax ledger name (intrastate)", "default": ""},
+                    "sgst_amount": {"type": "number", "description": "Total SGST/UTGST tax amount for the invoice", "default": 0},
+                    "igst_ledger": {"type": "string", "description": "IGST output tax ledger name (interstate)", "default": ""},
+                    "igst_amount": {"type": "number", "description": "Total IGST tax amount for the invoice", "default": 0},
+                    # ── Additional ledgers ─────────────────────────────────
                     "additional_ledgers": {
                         "description": (
                             "JSON array of voucher-level ledger entries added after inventory lines. "
@@ -527,19 +524,14 @@ async def list_tools() -> list[types.Tool]:
                         ),
                         "default": [],
                     },
-                    "cgst_ledger": {"type": "string", "description": "CGST output tax ledger name (intrastate)", "default": ""},
-                    "cgst_amount": {"type": "number", "description": "Total CGST tax amount for the invoice", "default": 0},
-                    "sgst_ledger": {"type": "string", "description": "SGST/UTGST output tax ledger name (intrastate)", "default": ""},
-                    "sgst_amount": {"type": "number", "description": "Total SGST/UTGST tax amount for the invoice", "default": 0},
-                    "igst_ledger": {"type": "string", "description": "IGST output tax ledger name (interstate)", "default": ""},
-                    "igst_amount": {"type": "number", "description": "Total IGST tax amount for the invoice", "default": 0},
+                    # ── GST header fields ──────────────────────────────────
                     "gst_registration_type": {"type": "string", "description": "Party GST registration type, e.g. 'Regular', 'Unregistered'", "default": ""},
                     "party_gstin": {"type": "string", "description": "Party GSTIN number (optional)", "default": ""},
                     "place_of_supply": {"type": "string", "description": "Place of supply state name (optional)", "default": ""},
                     "state_name": {"type": "string", "description": "Party state name (optional)", "default": ""},
                     **TALLY_URL_PROP,
                 },
-                "required": ["date", "party_ledger", "voucher_type", "line_items"],
+                "required": ["date", "party_ledger", "voucher_type", "stock_item_name", "sales_ledger", "quantity", "unit", "item_rate", "amount"],
             },
         ),
         types.Tool(
@@ -974,25 +966,28 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
                     tally_url=_url(arguments),
                 ))
 
-            case "create_sales_voucher":
-                # Normalise line_items: some MCP clients send the array serialised as a
-                # JSON string (sometimes including the key name). Parse it back to a list.
-                raw_items   = _parse_array_arg(arguments.get("line_items", []))
-                raw_extra   = _parse_array_arg(arguments.get("additional_ledgers", []))
+           case "create_sales_voucher":
+                raw_extra = _parse_array_arg(arguments.get("additional_ledgers", []))
                 return _ok(tc.create_sales_voucher(
                     date=arguments["date"],
                     party_ledger=arguments["party_ledger"],
-                    voucher_type=arguments.get("voucher_type", "Sales"),
-                    voucher_number=arguments.get("voucher_number", ""),
-                    narration=arguments.get("narration", ""),
-                    items=raw_items,
-                    additional_ledgers=raw_extra or None,
+                    stock_item_name=arguments.get("stock_item_name", ""),
+                    sales_ledger=arguments.get("sales_ledger", ""),
+                    quantity=float(arguments.get("quantity", 0)),
+                    unit=arguments.get("unit", ""),
+                    item_rate=float(arguments.get("item_rate", 0)),
+                    amount=float(arguments.get("amount", 0)),
+                    gst_rate=float(arguments.get("gst_rate", 0)),
                     cgst_ledger=arguments.get("cgst_ledger", ""),
                     cgst_amount=float(arguments.get("cgst_amount", 0)),
                     sgst_ledger=arguments.get("sgst_ledger", ""),
                     sgst_amount=float(arguments.get("sgst_amount", 0)),
                     igst_ledger=arguments.get("igst_ledger", ""),
                     igst_amount=float(arguments.get("igst_amount", 0)),
+                    voucher_type=arguments.get("voucher_type", "Sales"),
+                    voucher_number=arguments.get("voucher_number", ""),
+                    narration=arguments.get("narration", ""),
+                    additional_ledgers=raw_extra or None,
                     gst_registration_type=arguments.get("gst_registration_type", ""),
                     party_gstin=arguments.get("party_gstin", ""),
                     place_of_supply=arguments.get("place_of_supply", ""),

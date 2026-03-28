@@ -29,10 +29,11 @@ import uvicorn
 from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .server import app as mcp_app  # re-use the same MCP server with all tools
 
@@ -47,21 +48,41 @@ API_KEY = os.environ.get("MCP_API_KEY", "")
 # Optional API-key auth middleware
 # ─────────────────────────────────────────────────────────────────
 
-class ApiKeyMiddleware(BaseHTTPMiddleware):
-    """Reject requests that lack the correct Bearer token (when API_KEY is set)."""
+class ApiKeyMiddleware:
+    """Reject requests that lack the correct Bearer token (when API_KEY is set).
 
-    async def dispatch(self, request: Request, call_next):
+    Implemented as a pure ASGI middleware (NOT BaseHTTPMiddleware) so that
+    streaming responses such as SSE are never buffered.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         if not API_KEY:
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
 
         # Public paths — no auth required
-        if request.url.path in ("/health", "/", "/app"):
-            return await call_next(request)
+        if path in ("/health", "/", "/app"):
+            await self.app(scope, receive, send)
+            return
 
-        auth = request.headers.get("Authorization", "")
+        # Check Authorization header
+        headers = dict(scope.get("headers", []))
+        auth = headers.get(b"authorization", b"").decode()
         if auth != f"Bearer {API_KEY}":
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        return await call_next(request)
+            response = JSONResponse({"error": "Unauthorized"}, status_code=401)
+            await response(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -71,23 +92,20 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 sse_transport = SseServerTransport("/messages")
 
 
-async def handle_sse(request: Request):
-    """SSE endpoint — MCP clients connect here to receive events."""
-    async with sse_transport.connect_sse(
-        request.scope, request.receive, request._send  # type: ignore[attr-defined]
-    ) as (read_stream, write_stream):
+async def handle_sse(scope: Scope, receive: Receive, send: Send) -> None:
+    """SSE endpoint — raw ASGI handler so Starlette never wraps the response.
+
+    Using Mount + raw ASGI avoids both:
+      • TypeError  ('NoneType' not callable) from returning None to Route, and
+      • RuntimeError (double http.response.start) from returning Response() after
+        connect_sse has already sent SSE headers via `send`.
+    """
+    async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
         await mcp_app.run(
             read_stream,
             write_stream,
             mcp_app.create_initialization_options(),
         )
-
-
-async def handle_messages(request: Request):
-    """POST endpoint — MCP clients send tool call requests here."""
-    await sse_transport.handle_post_message(
-        request.scope, request.receive, request._send  # type: ignore[attr-defined]
-    )
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -98,7 +116,7 @@ async def health(request: Request):
     from . import tally_client as tc
     return JSONResponse({
         "status": "ok",
-        "tally_url": tc.TALLY_URL,
+        "tally_url": tc.DEFAULT_TALLY_URL,
         "version": "0.1.0",
     })
 
@@ -203,32 +221,40 @@ TALLY_TOOLS = [
             "required": [],
         },
     },
-    {
+{
         "name": "create_sales_voucher",
         "description": (
-            "Create a Sales invoice in TallyPrime. "
-            "line_items array: each item needs stock_item_name, sales_ledger, amount (net), rate, quantity, unit, gst_rate. "
-            "GST at voucher level: cgst_ledger+cgst_amount+sgst_ledger+sgst_amount (intrastate) OR igst_ledger+igst_amount (interstate). "
+            "Create a Sales invoice in TallyPrime with a single line item. "
+            "Pass item details as flat fields: stock_item_name, sales_ledger, quantity, unit, item_rate, amount. "
+            "GST fields: gst_rate (item %), plus cgst_ledger+cgst_amount+sgst_ledger+sgst_amount (intrastate) "
+            "OR igst_ledger+igst_amount (interstate). "
+            "For multi-item invoices, call once per item. "
             "ALWAYS confirm details with the user before calling this tool."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "date":          {"type": "string", "description": "Invoice date YYYYMMDD"},
-                "party_ledger":  {"type": "string", "description": "Customer ledger name"},
-                "voucher_type":  {"type": "string", "description": "Voucher type e.g. Sales, Tax Invoice", "default": "Sales"},
-                "voucher_number":{"type": "string", "description": "Invoice number (optional)", "default": ""},
-                "narration":     {"type": "string", "default": ""},
-                "line_items":    {"type": "array",  "items": {"type": "object"}, "description": "Array of line item objects"},
+                "date":            {"type": "string",  "description": "Invoice date YYYYMMDD"},
+                "party_ledger":    {"type": "string",  "description": "Customer ledger name"},
+                "voucher_type":    {"type": "string",  "description": "Voucher type e.g. Sales, Tax Invoice", "default": "Sales"},
+                "voucher_number":  {"type": "string",  "description": "Invoice number (optional)", "default": ""},
+                "narration":       {"type": "string",  "default": ""},
+                "stock_item_name": {"type": "string",  "description": "Product/stock item name as in TallyPrime"},
+                "sales_ledger":    {"type": "string",  "description": "Income/sales ledger to credit"},
+                "quantity":        {"type": "number",  "description": "Item quantity"},
+                "unit":            {"type": "string",  "description": "Unit of measure e.g. 'Nos', 'Kg'"},
+                "item_rate":       {"type": "number",  "description": "Price per unit"},
+                "amount":          {"type": "number",  "description": "Net line amount (post-discount, pre-tax)"},
+                "gst_rate":        {"type": "number",  "description": "GST % for this item e.g. 5, 12, 18, 28", "default": 0},
+                "cgst_ledger":     {"type": "string",  "default": ""},
+                "cgst_amount":     {"type": "number",  "default": 0},
+                "sgst_ledger":     {"type": "string",  "default": ""},
+                "sgst_amount":     {"type": "number",  "default": 0},
+                "igst_ledger":     {"type": "string",  "default": ""},
+                "igst_amount":     {"type": "number",  "default": 0},
                 "additional_ledgers": {"type": "array", "items": {"type": "object"}, "default": []},
-                "cgst_ledger":   {"type": "string", "default": ""},
-                "cgst_amount":   {"type": "number", "default": 0},
-                "sgst_ledger":   {"type": "string", "default": ""},
-                "sgst_amount":   {"type": "number", "default": 0},
-                "igst_ledger":   {"type": "string", "default": ""},
-                "igst_amount":   {"type": "number", "default": 0},
             },
-            "required": ["date", "party_ledger", "voucher_type", "line_items"],
+            "required": ["date", "party_ledger", "voucher_type", "stock_item_name", "sales_ledger", "quantity", "unit", "item_rate", "amount"],
         },
     },
     {
@@ -346,21 +372,27 @@ def execute_tally_tool(name: str, args: dict[str, Any]) -> Any:
                 tally_url=tally_url,
             )
 
-        elif name == "create_sales_voucher":
+elif name == "create_sales_voucher":
             return tc.create_sales_voucher(
                 date=args["date"],
                 party_ledger=args["party_ledger"],
+                stock_item_name=args.get("stock_item_name", ""),
+                sales_ledger=args.get("sales_ledger", ""),
+                quantity=float(args.get("quantity", 0)),
+                unit=args.get("unit", ""),
+                item_rate=float(args.get("item_rate", 0)),
+                amount=float(args.get("amount", 0)),
+                gst_rate=float(args.get("gst_rate", 0)),
+                cgst_ledger=args.get("cgst_ledger", ""),
+                cgst_amount=float(args.get("cgst_amount", 0)),
+                sgst_ledger=args.get("sgst_ledger", ""),
+                sgst_amount=float(args.get("sgst_amount", 0)),
+                igst_ledger=args.get("igst_ledger", ""),
+                igst_amount=float(args.get("igst_amount", 0)),
                 voucher_type=args.get("voucher_type", "Sales"),
                 voucher_number=args.get("voucher_number", ""),
                 narration=args.get("narration", ""),
-                line_items=args.get("line_items", []),
                 additional_ledgers=args.get("additional_ledgers", []),
-                cgst_ledger=args.get("cgst_ledger", ""),
-                cgst_amount=args.get("cgst_amount", 0),
-                sgst_ledger=args.get("sgst_ledger", ""),
-                sgst_amount=args.get("sgst_amount", 0),
-                igst_ledger=args.get("igst_ledger", ""),
-                igst_amount=args.get("igst_amount", 0),
                 tally_url=tally_url,
             )
 
@@ -513,18 +545,23 @@ starlette_app = Starlette(
         Route("/health",   health,          methods=["GET"]),
         Route("/app",      handle_app,      methods=["GET"]),
         Route("/chat",     handle_chat,     methods=["POST"]),
-        Route("/sse",      handle_sse,      methods=["GET"]),
+        Mount("/sse",      app=handle_sse),
         Mount("/messages", app=sse_transport.handle_post_message),
     ],
-    middleware=[Middleware(ApiKeyMiddleware)],
+    middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])],
 )
+
+
+# Wrap with pure-ASGI ApiKeyMiddleware AFTER Starlette is built so that
+# it sits outside the CORS middleware and never buffers streaming responses.
+asgi_app = ApiKeyMiddleware(starlette_app)
 
 
 def run():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logger.info("Starting TallyPrime MCP HTTP server on %s:%s", HOST, PORT)
     logger.info("Tally Gateway URL: %s", os.environ.get("TALLY_URL", "http://localhost:9000"))
-    uvicorn.run(starlette_app, host=HOST, port=PORT)
+    uvicorn.run(asgi_app, host=HOST, port=PORT)
 
 
 if __name__ == "__main__":
