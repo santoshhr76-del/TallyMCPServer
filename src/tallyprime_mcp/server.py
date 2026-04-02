@@ -724,6 +724,160 @@ async def list_tools() -> list[types.Tool]:
                 "required": [],
             },
         ),
+        # ── Units of Measure ───────────────────────────────────────
+        types.Tool(
+            name="get_unit",
+            description="Get details of a specific unit of measure by name. Useful to check if a unit exists before creating stock items.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Exact unit name as it appears in TallyPrime (e.g. 'Nos', 'Kg', 'Box')"},
+                    **TALLY_URL_PROP,
+                },
+                "required": ["name"],
+            },
+        ),
+        types.Tool(
+            name="get_all_units",
+            description="List all simple (non-compound) units of measure in the active TallyPrime company with their name and formal name.",
+            inputSchema={
+                "type": "object",
+                "properties": {**TALLY_URL_PROP},
+                "required": [],
+            },
+        ),
+        types.Tool(
+            name="create_simple_unit",
+            description=(
+                "Create a new simple Unit of Measure in TallyPrime (e.g. Box, Kg, Nos, Ltrs). "
+                "Provide the short symbol and optionally the full formal name. "
+                "ALWAYS confirm details with the user before calling this tool."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Unit symbol / short name (e.g. 'Box', 'Kg', 'Nos', 'Pcs')"},
+                    "original_name": {"type": "string", "description": "Full formal name (e.g. 'Boxes', 'Kilograms', 'Numbers'). Defaults to name if empty.", "default": ""},
+                    **TALLY_URL_PROP,
+                },
+                "required": ["name"],
+            },
+        ),
+
+        types.Tool(
+            name="create_compound_unit",
+            description=(
+                "Create a new compound Unit of Measure in TallyPrime that relates two simple units "
+                "via a conversion factor (e.g. 1 Kg = 1000 gm, 1 Dozen = 12 Nos). "
+                "Both base and additional simple units must already exist in TallyPrime. "
+                "ALWAYS confirm details with the user before calling this tool."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Compound unit name (e.g. 'Kg of 1000 gm', 'Dozen of 12 Nos')"},
+                    "base_units": {"type": "string", "description": "Primary/base unit symbol (e.g. 'Kg', 'Dozen')"},
+                    "additional_units": {"type": "string", "description": "Secondary unit symbol (e.g. 'gm', 'Nos')"},
+                    "conversion": {"type": "integer", "description": "How many additional_units make 1 base_unit (e.g. 1000, 12)"},
+                    **TALLY_URL_PROP,
+                },
+                "required": ["name", "base_units", "additional_units", "conversion"],
+            },
+        ),
+
+        # ── Stock Groups ──────────────────────────────────────────
+        types.Tool(
+            name="get_all_stock_groups",
+            description="List all stock groups in the active TallyPrime company with their name and parent group.",
+            inputSchema={
+                "type": "object",
+                "properties": {**TALLY_URL_PROP},
+                "required": [],
+            },
+        ),
+        types.Tool(
+            name="get_stock_group",
+            description="Get full details of a specific stock group by name: parent group, opening balance, and closing balance.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Exact stock group name as it appears in TallyPrime"},
+                    **TALLY_URL_PROP,
+                },
+                "required": ["name"],
+            },
+        ),
+        types.Tool(
+            name="create_stock_group",
+            description=(
+                "Create a new Stock Group in TallyPrime. "
+                "Optionally specify a parent group for nesting (e.g. create 'Green Tea' under 'Tea Products'). "
+                "ALWAYS confirm details with the user before calling this tool."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Stock group name (e.g. 'Tea Products', 'Electronics')"},
+                    "parent": {"type": "string", "description": "Parent stock group for nesting (leave empty for top-level)", "default": ""},
+                    **TALLY_URL_PROP,
+                },
+                "required": ["name"],
+            },
+        ),
+        types.Tool(
+            name="get_stock_items_of_group",
+            description=(
+                "List all stock items belonging to a specific stock group in TallyPrime. "
+                "Returns each item's name, parent group, base unit, closing balance, and closing value."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "group_name": {"type": "string", "description": "Exact stock group name as it appears in TallyPrime (e.g. 'Gadgets', 'Raw Materials')"},
+                    **TALLY_URL_PROP,
+                },
+                "required": ["group_name"],
+            },
+        ),
+        types.Tool(
+            name="get_all_stock_items",
+            description="List all stock items in the active TallyPrime company with their name and parent stock group.",
+            inputSchema={
+                "type": "object",
+                "properties": {**TALLY_URL_PROP},
+                "required": [],
+            },
+        ),
+        types.Tool(
+            name="get_stock_item",
+            description="Get full details of a specific stock item by name: parent group, base unit, and closing balance.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Exact stock item name as it appears in TallyPrime"},
+                    **TALLY_URL_PROP,
+                },
+                "required": ["name"],
+            },
+        ),
+        types.Tool(
+            name="create_stock_item",
+            description=(
+                "Create a new Stock Item in TallyPrime. "
+                "Specify the item name, stock group (parent), and base unit of measure. "
+                "ALWAYS confirm details with the user before calling this tool."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Stock item name (e.g. 'Tea Powder', 'Sugar 1kg')"},
+                    "parent": {"type": "string", "description": "Stock group / parent group (default: Primary)", "default": "Primary"},
+                    "base_units": {"type": "string", "description": "Unit of measure (e.g. 'nos', 'kg', 'pcs', 'ltrs')", "default": "nos"},
+                    **TALLY_URL_PROP,
+                },
+                "required": ["name"],
+            },
+        ),
         types.Tool(
             name="get_stock_summary",
             description="Fetch the Stock Summary from TallyPrime showing all stock items with quantities and values.",
@@ -1081,6 +1235,70 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
                 return _ok(tc.fetch_profit_loss(
                     from_date=arguments.get("from_date", ""),
                     to_date=arguments.get("to_date", ""),
+                    tally_url=_url(arguments),
+                ))
+
+            case "get_unit":
+                return _ok(tc.get_unit(
+                    name=arguments["name"],
+                    tally_url=_url(arguments),
+                ))
+
+            case "get_all_units":
+                return _ok(tc.get_all_units(tally_url=_url(arguments)))
+
+            case "create_compound_unit":
+                return _ok(tc.create_compound_unit(
+                    name=arguments["name"],
+                    base_units=arguments["base_units"],
+                    additional_units=arguments["additional_units"],
+                    conversion=int(arguments["conversion"]),
+                    tally_url=_url(arguments),
+                ))
+
+            case "create_simple_unit":
+                return _ok(tc.create_simple_unit(
+                    name=arguments["name"],
+                    original_name=arguments.get("original_name", ""),
+                    tally_url=_url(arguments),
+                ))
+
+            case "get_all_stock_groups":
+                return _ok(tc.get_all_stock_groups(tally_url=_url(arguments)))
+
+            case "get_stock_group":
+                return _ok(tc.get_stock_group(
+                    name=arguments["name"],
+                    tally_url=_url(arguments),
+                ))
+
+            case "create_stock_group":
+                return _ok(tc.create_stock_group(
+                    name=arguments["name"],
+                    parent=arguments.get("parent", ""),
+                    tally_url=_url(arguments),
+                ))
+
+            case "get_stock_items_of_group":
+                return _ok(tc.get_stock_items_of_group(
+                    group_name=arguments["group_name"],
+                    tally_url=_url(arguments),
+                ))
+
+            case "get_all_stock_items":
+                return _ok(tc.get_all_stock_items(tally_url=_url(arguments)))
+
+            case "get_stock_item":
+                return _ok(tc.get_stock_item(
+                    name=arguments["name"],
+                    tally_url=_url(arguments),
+                ))
+
+            case "create_stock_item":
+                return _ok(tc.create_stock_item(
+                    name=arguments["name"],
+                    parent=arguments.get("parent", "Primary"),
+                    base_units=arguments.get("base_units", "nos"),
                     tally_url=_url(arguments),
                 ))
 

@@ -2321,6 +2321,604 @@ def fetch_profit_loss(from_date: str = "", to_date: str = "", tally_url: str | N
     return {"entries": entries}
 
 
+def create_simple_unit(
+    name: str,
+    original_name: str = "",
+    tally_url: str | None = None,
+) -> dict[str, Any]:
+    """Create a new simple Unit of Measure in TallyPrime.
+
+    Uses <TYPE>Data</TYPE> + <ID>All Masters</ID> — the correct format for
+    TallyPrime Import requests via the XML Gateway.
+
+    Args:
+        name:          Unit symbol/short name (e.g. 'Box', 'Kg', 'Nos')
+        original_name: Full/formal name of the unit (e.g. 'Boxes', 'Kilograms', 'Numbers').
+                       If empty, defaults to the same as name.
+        tally_url:     Optional TallyPrime Gateway URL override
+    """
+    formal_name = original_name or name
+
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Import</TALLYREQUEST>
+        <TYPE>Data</TYPE>
+        <ID>All Masters</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVMSTIMPORTFORMAT>XML</SVMSTIMPORTFORMAT>
+            </STATICVARIABLES>
+            <TALLYMESSAGE xmlns:UDF="TallyUDF">
+                <UNIT NAME="{_xe(name)}" ACTION="Create">
+                    <NAME>{_xe(name)}</NAME>
+                    <ISSIMPLEUNIT>Yes</ISSIMPLEUNIT>
+                    <ORIGINALNAME>{_xe(formal_name)}</ORIGINALNAME>
+                </UNIT>
+            </TALLYMESSAGE>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    created = _find_text(root, ".//CREATED", "0")
+    altered = _find_text(root, ".//ALTERED", "0")
+    errors  = _find_text(root, ".//ERRORS",  "0")
+
+    if int(created) >= 1 or int(altered) >= 1:
+        return {
+            "status": "success",
+            "message": f"Unit '{name}' ({formal_name}) created successfully.",
+            "name": name,
+            "original_name": formal_name,
+            "created": created,
+            "altered": altered,
+        }
+    else:
+        error_desc = _find_text(root, ".//LINEERROR", "")
+        if not error_desc:
+            error_desc = _find_text(root, ".//LASTERROR", "")
+        return {
+            "status": "error",
+            "message": f"Failed to create unit '{name}'.",
+            "errors": errors,
+            "error_details": error_desc or raw[:500],
+        }
+
+
+def get_unit(
+    name: str,
+    tally_url: str | None = None,
+) -> dict[str, Any]:
+    """Fetch details of a specific Unit of Measure from TallyPrime by name.
+
+    Uses <TYPE>Object</TYPE> + <SUBTYPE>Unit</SUBTYPE> export request.
+
+    Args:
+        name:      Exact unit name as it appears in TallyPrime (e.g. 'Nos', 'Kg')
+        tally_url: Optional TallyPrime Gateway URL override
+    """
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Object</TYPE>
+        <SUBTYPE>Unit</SUBTYPE>
+        <ID TYPE="Name">{_xe(name)}</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVEXPORTFORMAT>XML</SVEXPORTFORMAT>
+            </STATICVARIABLES>
+            <FETCHLIST>
+                <FETCH>Name</FETCH>
+            </FETCHLIST>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    unit = root.find(".//UNIT")
+    if unit is None:
+        return {"error": f"Unit '{name}' not found in TallyPrime."}
+
+    return {
+        "name": unit.get("NAME") or _find_text(unit, "NAME"),
+    }
+
+
+def get_all_units(
+    tally_url: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch all simple Units of Measure from TallyPrime.
+
+    Uses a TDL collection with a filter for IsSimpleUnit to return only
+    simple (non-compound) units.
+
+    Args:
+        tally_url: Optional TallyPrime Gateway URL override
+    """
+    xml = """<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>TSPLSimpleUnits</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVEXPORTFORMAT>XML</SVEXPORTFORMAT>
+            </STATICVARIABLES>
+            <TDL>
+                <TDLMESSAGE>
+                    <COLLECTION NAME="TSPL SimpleUnits" ISMODIFY="No" ISFIXED="No" ISINITIALIZE="No" ISOPTION="No" ISINTERNAL="No">
+                        <TYPE>Unit</TYPE>
+                        <NATIVEMETHOD>Name, OriginalName, IsSimpleUnit</NATIVEMETHOD>
+                        <FILTERS>TSPLSimpleUnitsOnly</FILTERS>
+                    </COLLECTION>
+                    <SYSTEM TYPE="Formulae" NAME="TSPLSimpleUnitsOnly" ISMODIFY="No" ISFIXED="No" ISINTERNAL="No">$IsSimpleUnit  </SYSTEM>
+                </TDLMESSAGE>
+            </TDL>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    units = []
+    for unit in root.findall(".//UNIT"):
+        units.append({
+            "name": unit.get("NAME") or _find_text(unit, "NAME"),
+            "original_name": _find_text(unit, "ORIGINALNAME"),
+            "is_simple_unit": _find_text(unit, "ISSIMPLEUNIT"),
+        })
+    return units
+
+
+def create_compound_unit(
+    name: str,
+    base_units: str,
+    additional_units: str,
+    conversion: int,
+    tally_url: str | None = None,
+) -> dict[str, Any]:
+    """Create a new compound Unit of Measure in TallyPrime.
+
+    A compound unit relates two simple units via a conversion factor,
+    e.g. '1 Kg = 1000 gm'.
+
+    Uses <TYPE>Data</TYPE> + <ID>All Masters</ID> — the correct format for
+    TallyPrime Import requests via the XML Gateway.
+
+    Args:
+        name:             Compound unit name (e.g. 'Kg of 1000 gm')
+        base_units:       Primary/base unit symbol (e.g. 'Kg')
+        additional_units: Secondary unit symbol (e.g. 'gm')
+        conversion:       How many additional_units make 1 base_unit (e.g. 1000)
+        tally_url:        Optional TallyPrime Gateway URL override
+    """
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Import</TALLYREQUEST>
+        <TYPE>Data</TYPE>
+        <ID>All Masters</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVMSTIMPORTFORMAT>XML</SVMSTIMPORTFORMAT>
+            </STATICVARIABLES>
+            <TALLYMESSAGE xmlns:UDF="TallyUDF">
+                <UNIT NAME="{_xe(name)}" ACTION="Create">
+                    <NAME>{_xe(name)}</NAME>
+                    <BASEUNITS>{_xe(base_units)}</BASEUNITS>
+                    <ADDITIONALUNITS>{_xe(additional_units)}</ADDITIONALUNITS>
+                    <ISSIMPLEUNIT>No</ISSIMPLEUNIT>
+                    <CONVERSION> {conversion}</CONVERSION>
+                </UNIT>
+            </TALLYMESSAGE>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    created = _find_text(root, ".//CREATED", "0")
+    altered = _find_text(root, ".//ALTERED", "0")
+    errors  = _find_text(root, ".//ERRORS",  "0")
+
+    if int(created) >= 1 or int(altered) >= 1:
+        return {
+            "status": "success",
+            "message": f"Compound unit '{name}' created successfully (1 {base_units} = {conversion} {additional_units}).",
+            "name": name,
+            "base_units": base_units,
+            "additional_units": additional_units,
+            "conversion": conversion,
+            "created": created,
+            "altered": altered,
+        }
+    else:
+        error_desc = _find_text(root, ".//LINEERROR", "")
+        if not error_desc:
+            error_desc = _find_text(root, ".//LASTERROR", "")
+        return {
+            "status": "error",
+            "message": f"Failed to create compound unit '{name}'.",
+            "errors": errors,
+            "error_details": error_desc or raw[:500],
+        }
+
+
+def get_all_stock_groups(
+    tally_url: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch all Stock Groups from TallyPrime.
+
+    Uses <TYPE>Collection</TYPE> + <ID>StockGroup</ID> export request.
+    Returns a list of stock groups with name and parent.
+
+    Args:
+        tally_url: Optional TallyPrime Gateway URL override
+    """
+    xml = """<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>StockGroup</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVEXPORTFORMAT>XML</SVEXPORTFORMAT>
+            </STATICVARIABLES>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    groups = []
+    for group in root.findall(".//STOCKGROUP"):
+        groups.append({
+            "name": group.get("NAME") or _find_text(group, "NAME"),
+            "parent": _find_text(group, "PARENT"),
+        })
+    return groups
+
+
+def get_stock_group(
+    name: str,
+    tally_url: str | None = None,
+) -> dict[str, Any]:
+    """Fetch details of a specific Stock Group from TallyPrime by name.
+
+    Uses <TYPE>Object</TYPE> + <SUBTYPE>Stock Group</SUBTYPE> export request.
+
+    Args:
+        name:      Exact stock group name as it appears in TallyPrime
+        tally_url: Optional TallyPrime Gateway URL override
+    """
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Object</TYPE>
+        <SUBTYPE>Stock Group</SUBTYPE>
+        <ID TYPE="Name">{_xe(name)}</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVEXPORTFORMAT>XML</SVEXPORTFORMAT>
+            </STATICVARIABLES>
+            <FETCHLIST>
+                <FETCH>Name</FETCH>
+                <FETCH>Parent</FETCH>
+                <FETCH>Opening Balance</FETCH>
+                <FETCH>Closing Balance</FETCH>
+            </FETCHLIST>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    group = root.find(".//STOCKGROUP")
+    if group is None:
+        return {"error": f"Stock group '{name}' not found in TallyPrime."}
+
+    return {
+        "name": group.get("NAME") or _find_text(group, "NAME"),
+        "parent": _find_text(group, "PARENT"),
+        "opening_balance": _find_text(group, "OPENINGBALANCE"),
+        "closing_balance": _find_text(group, "CLOSINGBALANCE"),
+    }
+
+
+def create_stock_group(
+    name: str,
+    parent: str = "",
+    tally_url: str | None = None,
+) -> dict[str, Any]:
+    """Create a new Stock Group in TallyPrime.
+
+    Uses <TYPE>Data</TYPE> + <ID>All Masters</ID> — the correct format for
+    TallyPrime Import requests via the XML Gateway.
+
+    Args:
+        name:      Stock group name (e.g. 'Tea Products', 'Electronics')
+        parent:    Parent stock group (leave empty for top-level under Primary)
+        tally_url: Optional TallyPrime Gateway URL override
+    """
+    parent_xml = f"<PARENT>{_xe(parent)}</PARENT>" if parent else ""
+
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Import</TALLYREQUEST>
+        <TYPE>Data</TYPE>
+        <ID>All Masters</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVMSTIMPORTFORMAT>XML</SVMSTIMPORTFORMAT>
+            </STATICVARIABLES>
+            <TALLYMESSAGE xmlns:UDF="TallyUDF">
+                <STOCKGROUP NAME="{_xe(name)}" Action="Create">
+                    <NAME>{_xe(name)}</NAME>
+                    {parent_xml}
+                </STOCKGROUP>
+            </TALLYMESSAGE>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    created = _find_text(root, ".//CREATED", "0")
+    altered = _find_text(root, ".//ALTERED", "0")
+    errors  = _find_text(root, ".//ERRORS",  "0")
+
+    if int(created) >= 1 or int(altered) >= 1:
+        return {
+            "status": "success",
+            "message": f"Stock group '{name}' created successfully.",
+            "name": name,
+            "parent": parent or "(Primary)",
+            "created": created,
+            "altered": altered,
+        }
+    else:
+        error_desc = _find_text(root, ".//LINEERROR", "")
+        if not error_desc:
+            error_desc = _find_text(root, ".//LASTERROR", "")
+        return {
+            "status": "error",
+            "message": f"Failed to create stock group '{name}'.",
+            "errors": errors,
+            "error_details": error_desc or raw[:500],
+        }
+
+
+def get_stock_items_of_group(
+    group_name: str,
+    tally_url: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch all Stock Items belonging to a specific Stock Group in TallyPrime.
+
+    Uses a TDL collection with CHILDOF filter to retrieve only items under
+    the specified stock group.
+
+    Args:
+        group_name: Exact stock group name as it appears in TallyPrime (e.g. 'Gadgets', 'Raw Materials')
+        tally_url:  Optional TallyPrime Gateway URL override
+    """
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>TSPLStockOfGroup</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVEXPORTFORMAT>XML</SVEXPORTFORMAT>
+            </STATICVARIABLES>
+            <TDL>
+                <TDLMESSAGE>
+                    <COLLECTION NAME="TSPLStockOfGroup" ISMODIFY="No" ISFIXED="No" ISINITIALIZE="No" ISOPTION="No" ISINTERNAL="No">
+                        <TYPE>StockItem</TYPE>
+                        <CHILDOF>&quot;{_xe(group_name)}&quot;</CHILDOF>
+                        <NATIVEMETHOD>Name, Parent, ClosingBalance, ClosingValue, BaseUnits</NATIVEMETHOD>
+                    </COLLECTION>
+                </TDLMESSAGE>
+            </TDL>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    items = []
+    for item in root.findall(".//STOCKITEM"):
+        items.append({
+            "name": item.get("NAME") or _find_text(item, "NAME"),
+            "parent": _find_text(item, "PARENT"),
+            "base_units": _find_text(item, "BASEUNITS"),
+            "closing_balance": _find_text(item, "CLOSINGBALANCE"),
+            "closing_value": _find_text(item, "CLOSINGVALUE"),
+        })
+    return items
+
+
+def get_all_stock_items(
+    tally_url: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch all Stock Items from TallyPrime.
+
+    Uses <TYPE>Collection</TYPE> + <ID>StockItem</ID> export request.
+    Returns a list of stock items with name and parent group.
+
+    Args:
+        tally_url: Optional TallyPrime Gateway URL override
+    """
+    xml = """<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Collection</TYPE>
+        <ID>StockItem</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVEXPORTFORMAT>XML</SVEXPORTFORMAT>
+            </STATICVARIABLES>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    items = []
+    for item in root.findall(".//STOCKITEM"):
+        items.append({
+            "name": item.get("NAME") or _find_text(item, "NAME"),
+            "parent": _find_text(item, "PARENT"),
+        })
+    return items
+
+
+def get_stock_item(
+    name: str,
+    tally_url: str | None = None,
+) -> dict[str, Any]:
+    """Fetch details of a specific Stock Item from TallyPrime by name.
+
+    Uses <TYPE>Object</TYPE> + <SUBTYPE>Stock Item</SUBTYPE> export request.
+
+    Args:
+        name:      Exact stock item name as it appears in TallyPrime
+        tally_url: Optional TallyPrime Gateway URL override
+    """
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Export</TALLYREQUEST>
+        <TYPE>Object</TYPE>
+        <SUBTYPE>Stock Item</SUBTYPE>
+        <ID TYPE="Name">{_xe(name)}</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVEXPORTFORMAT>XML</SVEXPORTFORMAT>
+            </STATICVARIABLES>
+            <FETCHLIST>
+                <FETCH>Name</FETCH>
+                <FETCH>Parent</FETCH>
+                <FETCH>BaseUnits</FETCH>
+                <FETCH>Closing Balance</FETCH>
+            </FETCHLIST>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    item = root.find(".//STOCKITEM")
+    if item is None:
+        return {"error": f"Stock item '{name}' not found in TallyPrime."}
+
+    return {
+        "name": item.get("NAME") or _find_text(item, "NAME"),
+        "parent": _find_text(item, "PARENT"),
+        "base_units": _find_text(item, "BASEUNITS"),
+        "closing_balance": _find_text(item, "CLOSINGBALANCE"),
+    }
+
+
+def create_stock_item(
+    name: str,
+    parent: str = "\x04 Primary",
+    base_units: str = "nos",
+    tally_url: str | None = None,
+) -> dict[str, Any]:
+    """Create a new Stock Item in TallyPrime.
+
+    Uses <TYPE>Data</TYPE> + <ID>All Masters</ID> — the correct format for
+    TallyPrime Import requests via the XML Gateway.
+
+    Args:
+        name:       Stock item name (e.g. 'Tea Powder')
+        parent:     Stock group (default: Primary)
+        base_units: Unit of measure (e.g. 'nos', 'kg', 'pcs')
+        tally_url:  Optional TallyPrime Gateway URL override
+    """
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Import</TALLYREQUEST>
+        <TYPE>Data</TYPE>
+        <ID>All Masters</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVMSTIMPORTFORMAT>XML</SVMSTIMPORTFORMAT>
+            </STATICVARIABLES>
+            <TALLYMESSAGE>
+                <StockItem NAME="{_xe(name)}" Action="Create">
+                    <NAME>{_xe(name)}</NAME>
+                    <PARENT>&#4; {_xe(parent)}</PARENT>
+                    <BaseUnits>{_xe(base_units)}</BaseUnits>
+                </StockItem>
+            </TALLYMESSAGE>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    # Tally returns <CREATED>1</CREATED> on success
+    created = _find_text(root, ".//CREATED", "0")
+    altered = _find_text(root, ".//ALTERED", "0")
+    errors  = _find_text(root, ".//ERRORS",  "0")
+
+    if int(created) >= 1 or int(altered) >= 1:
+        return {
+            "status": "success",
+            "message": f"Stock item '{name}' created successfully.",
+            "name": name,
+            "parent": parent,
+            "base_units": base_units,
+            "created": created,
+            "altered": altered,
+        }
+    else:
+        # Try to extract error details from response
+        error_desc = _find_text(root, ".//LINEERROR", "")
+        if not error_desc:
+            error_desc = _find_text(root, ".//LASTERROR", "")
+        return {
+            "status": "error",
+            "message": f"Failed to create stock item '{name}'.",
+            "errors": errors,
+            "error_details": error_desc or raw[:500],
+        }
+
+
 def fetch_stock_summary(tally_url: str | None = None) -> list[dict[str, Any]]:
     xml = """<ENVELOPE>
   <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>
