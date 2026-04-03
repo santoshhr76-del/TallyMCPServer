@@ -354,11 +354,12 @@ TALLY_TOOLS = [
     {
         "name": "create_sales_voucher",
         "description": (
-            "Create a Sales invoice in TallyPrime with a single line item. "
-            "Pass item details as flat fields: stock_item_name, sales_ledger, quantity, unit, item_rate, amount. "
-            "GST fields: gst_rate (item %), plus cgst_ledger+cgst_amount+sgst_ledger+sgst_amount (intrastate) "
+            "Create a Sales invoice in TallyPrime with multiple inventory line items. "
+            "Pass items as a JSON array in line_items: each needs stock_item_name, sales_ledger, "
+            "quantity, unit, rate, amount (net, post-discount, pre-tax), gst_rate (per-line GST %). "
+            "Optional per-item: hsn, godown, discount_percent, discount_amount. "
+            "GST tax ledgers (voucher-level): cgst_ledger+cgst_amount+sgst_ledger+sgst_amount (intrastate) "
             "OR igst_ledger+igst_amount (interstate). "
-            "For multi-item invoices, call once per item. "
             "ALWAYS confirm details with the user before calling this tool."
         ),
         "input_schema": {
@@ -369,13 +370,7 @@ TALLY_TOOLS = [
                 "voucher_type":    {"type": "string",  "description": "Voucher type e.g. Sales, Tax Invoice", "default": "Sales"},
                 "voucher_number":  {"type": "string",  "description": "Invoice number (optional)", "default": ""},
                 "narration":       {"type": "string",  "default": ""},
-                "stock_item_name": {"type": "string",  "description": "Product/stock item name as in TallyPrime"},
-                "sales_ledger":    {"type": "string",  "description": "Income/sales ledger to credit"},
-                "quantity":        {"type": "number",  "description": "Item quantity"},
-                "unit":            {"type": "string",  "description": "Unit of measure e.g. 'Nos', 'Kg'"},
-                "item_rate":       {"type": "number",  "description": "Price per unit"},
-                "amount":          {"type": "number",  "description": "Net line amount (post-discount, pre-tax)"},
-                "gst_rate":        {"type": "number",  "description": "GST % for this item e.g. 5, 12, 18, 28", "default": 0},
+                "line_items":      {"type": "array",   "items": {"type": "object"}, "description": "Array of inventory line items", "default": []},
                 "cgst_ledger":     {"type": "string",  "default": ""},
                 "cgst_amount":     {"type": "number",  "default": 0},
                 "sgst_ledger":     {"type": "string",  "default": ""},
@@ -383,36 +378,102 @@ TALLY_TOOLS = [
                 "igst_ledger":     {"type": "string",  "default": ""},
                 "igst_amount":     {"type": "number",  "default": 0},
                 "additional_ledgers": {"type": "array", "items": {"type": "object"}, "default": []},
+                "gst_registration_type": {"type": "string", "default": ""},
+                "party_gstin":     {"type": "string",  "default": ""},
+                "place_of_supply": {"type": "string",  "default": ""},
+                "state_name":      {"type": "string",  "default": ""},
+                "cmp_gstin":       {"type": "string",  "default": ""},
+                "bill_name":       {"type": "string",  "description": "Bill reference for bill-wise tracking", "default": ""},
+                "bill_type":       {"type": "string",  "description": "'New Ref', 'Agst Ref', 'Advance'", "default": "New Ref"},
             },
-            "required": ["date", "party_ledger", "voucher_type", "stock_item_name", "sales_ledger", "quantity", "unit", "item_rate", "amount"],
+            "required": ["date", "party_ledger", "line_items"],
+        },
+    },
+    {
+        "name": "create_purchase_voucher",
+        "description": (
+            "Create a Purchase invoice in TallyPrime with multiple inventory line items. "
+            "Pass items as a JSON array in line_items: each needs stock_item_name, purchase_ledger, "
+            "quantity, unit, rate, amount (net, always positive — code negates for XML), gst_rate. "
+            "Optional per-item: hsn, godown, discount_percent, discount_amount. "
+            "GST input tax ledgers (voucher-level): cgst_ledger+cgst_amount+sgst_ledger+sgst_amount (intrastate) "
+            "OR igst_ledger+igst_amount (interstate). "
+            "reference: supplier's invoice number for payables bill tracking. "
+            "ALWAYS confirm details with the user before calling this tool."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date":            {"type": "string",  "description": "Invoice date YYYYMMDD"},
+                "party_ledger":    {"type": "string",  "description": "Supplier ledger name"},
+                "voucher_type":    {"type": "string",  "description": "Voucher type e.g. Purchase", "default": "Purchase"},
+                "voucher_number":  {"type": "string",  "description": "Internal voucher number (optional)", "default": ""},
+                "reference":       {"type": "string",  "description": "Supplier invoice/bill number for payables tracking", "default": ""},
+                "narration":       {"type": "string",  "default": ""},
+                "line_items":      {"type": "array",   "items": {"type": "object"}, "description": "Array of inventory line items", "default": []},
+                "cgst_ledger":     {"type": "string",  "default": ""},
+                "cgst_amount":     {"type": "number",  "default": 0},
+                "sgst_ledger":     {"type": "string",  "default": ""},
+                "sgst_amount":     {"type": "number",  "default": 0},
+                "igst_ledger":     {"type": "string",  "default": ""},
+                "igst_amount":     {"type": "number",  "default": 0},
+                "additional_ledgers": {"type": "array", "items": {"type": "object"}, "default": []},
+                "gst_registration_type": {"type": "string", "default": ""},
+                "party_gstin":     {"type": "string",  "default": ""},
+                "place_of_supply": {"type": "string",  "default": ""},
+                "state_name":      {"type": "string",  "default": ""},
+                "cmp_gstin":       {"type": "string",  "default": ""},
+            },
+            "required": ["date", "party_ledger", "line_items"],
         },
     },
     {
         "name": "create_payment_voucher",
-        "description": "Create a Payment voucher. Debits the party, credits the bank/cash ledger. ALWAYS confirm with user before calling.",
+        "description": (
+            "Create a Payment voucher. Debits the party, credits the bank/cash ledger. "
+            "Optionally include bill allocation and bank transfer details (NEFT/RTGS/IMPS). "
+            "ALWAYS confirm with user before calling."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "date":         {"type": "string", "description": "Payment date YYYYMMDD"},
-                "party_ledger": {"type": "string", "description": "Supplier/party being paid"},
-                "bank_ledger":  {"type": "string", "description": "Bank or cash ledger name"},
-                "amount":       {"type": "number", "description": "Payment amount"},
-                "narration":    {"type": "string", "default": ""},
+                "date":               {"type": "string", "description": "Payment date YYYYMMDD"},
+                "party_ledger":       {"type": "string", "description": "Supplier/party being paid"},
+                "bank_ledger":        {"type": "string", "description": "Bank or cash ledger name"},
+                "amount":             {"type": "number", "description": "Payment amount"},
+                "narration":          {"type": "string", "default": ""},
+                "bill_name":          {"type": "string", "description": "Bill reference for bill-wise tracking", "default": ""},
+                "bill_type":          {"type": "string", "description": "'New Ref', 'Agst Ref', 'Advance'", "default": "New Ref"},
+                "transaction_type":   {"type": "string", "description": "e.g. 'Inter Bank Transfer'", "default": ""},
+                "transfer_mode":      {"type": "string", "description": "e.g. 'NEFT', 'RTGS', 'IMPS', 'UPI'", "default": ""},
+                "ifsc_code":          {"type": "string", "description": "Bank IFSC code", "default": ""},
+                "bank_name":          {"type": "string", "description": "Beneficiary bank name", "default": ""},
+                "account_number":     {"type": "string", "description": "Beneficiary account number", "default": ""},
+                "instrument_number":  {"type": "string", "description": "Transaction reference number", "default": ""},
+                "payment_favouring":  {"type": "string", "description": "Beneficiary name", "default": ""},
             },
             "required": ["date", "party_ledger", "bank_ledger", "amount"],
         },
     },
     {
         "name": "create_receipt_voucher",
-        "description": "Create a Receipt voucher. Credits the party, debits the bank/cash ledger. ALWAYS confirm with user before calling.",
+        "description": (
+            "Create a Receipt voucher. Credits the party, debits the bank/cash ledger. "
+            "Optionally include cheque/DD/transfer details. "
+            "ALWAYS confirm with user before calling."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "date":         {"type": "string", "description": "Receipt date YYYYMMDD"},
-                "party_ledger": {"type": "string", "description": "Customer who paid"},
-                "bank_ledger":  {"type": "string", "description": "Bank or cash ledger name"},
-                "amount":       {"type": "number", "description": "Receipt amount"},
-                "narration":    {"type": "string", "default": ""},
+                "date":               {"type": "string", "description": "Receipt date YYYYMMDD"},
+                "party_ledger":       {"type": "string", "description": "Customer/party who paid"},
+                "bank_ledger":        {"type": "string", "description": "Bank or cash ledger name"},
+                "amount":             {"type": "number", "description": "Receipt amount"},
+                "narration":          {"type": "string", "default": ""},
+                "transaction_type":   {"type": "string", "description": "e.g. 'Cheque/DD', 'Inter Bank Transfer'", "default": ""},
+                "bank_name":          {"type": "string", "description": "Payer bank name", "default": ""},
+                "payment_favouring":  {"type": "string", "description": "Payment in favour of", "default": ""},
+                "instrument_number":  {"type": "string", "description": "Cheque/transaction reference number", "default": ""},
             },
             "required": ["date", "party_ledger", "bank_ledger", "amount"],
         },
@@ -570,13 +631,7 @@ def execute_tally_tool(name: str, args: dict[str, Any]) -> Any:
             return tc.create_sales_voucher(
                 date=args["date"],
                 party_ledger=args["party_ledger"],
-                stock_item_name=args.get("stock_item_name", ""),
-                sales_ledger=args.get("sales_ledger", ""),
-                quantity=float(args.get("quantity", 0)),
-                unit=args.get("unit", ""),
-                item_rate=float(args.get("item_rate", 0)),
-                amount=float(args.get("amount", 0)),
-                gst_rate=float(args.get("gst_rate", 0)),
+                items=args.get("line_items", []),
                 cgst_ledger=args.get("cgst_ledger", ""),
                 cgst_amount=float(args.get("cgst_amount", 0)),
                 sgst_ledger=args.get("sgst_ledger", ""),
@@ -587,6 +642,37 @@ def execute_tally_tool(name: str, args: dict[str, Any]) -> Any:
                 voucher_number=args.get("voucher_number", ""),
                 narration=args.get("narration", ""),
                 additional_ledgers=args.get("additional_ledgers", []),
+                gst_registration_type=args.get("gst_registration_type", ""),
+                party_gstin=args.get("party_gstin", ""),
+                place_of_supply=args.get("place_of_supply", ""),
+                state_name=args.get("state_name", ""),
+                cmp_gstin=args.get("cmp_gstin", ""),
+                bill_name=args.get("bill_name", ""),
+                bill_type=args.get("bill_type", "New Ref"),
+                tally_url=tally_url,
+            )
+
+        elif name == "create_purchase_voucher":
+            return tc.create_purchase_voucher(
+                date=args["date"],
+                party_ledger=args["party_ledger"],
+                items=args.get("line_items", []),
+                voucher_type=args.get("voucher_type", "Purchase"),
+                voucher_number=args.get("voucher_number", ""),
+                reference=args.get("reference", ""),
+                narration=args.get("narration", ""),
+                cgst_ledger=args.get("cgst_ledger", ""),
+                cgst_amount=float(args.get("cgst_amount", 0)),
+                sgst_ledger=args.get("sgst_ledger", ""),
+                sgst_amount=float(args.get("sgst_amount", 0)),
+                igst_ledger=args.get("igst_ledger", ""),
+                igst_amount=float(args.get("igst_amount", 0)),
+                additional_ledgers=args.get("additional_ledgers", []),
+                gst_registration_type=args.get("gst_registration_type", ""),
+                party_gstin=args.get("party_gstin", ""),
+                place_of_supply=args.get("place_of_supply", ""),
+                state_name=args.get("state_name", ""),
+                cmp_gstin=args.get("cmp_gstin", ""),
                 tally_url=tally_url,
             )
 
@@ -597,6 +683,15 @@ def execute_tally_tool(name: str, args: dict[str, Any]) -> Any:
                 bank_or_cash_ledger=args["bank_ledger"],
                 amount=float(args["amount"]),
                 narration=args.get("narration", ""),
+                bill_name=args.get("bill_name", ""),
+                bill_type=args.get("bill_type", "New Ref"),
+                transaction_type=args.get("transaction_type", ""),
+                transfer_mode=args.get("transfer_mode", ""),
+                ifsc_code=args.get("ifsc_code", ""),
+                bank_name=args.get("bank_name", ""),
+                account_number=args.get("account_number", ""),
+                instrument_number=args.get("instrument_number", ""),
+                payment_favouring=args.get("payment_favouring", ""),
                 tally_url=tally_url,
             )
 
@@ -607,6 +702,10 @@ def execute_tally_tool(name: str, args: dict[str, Any]) -> Any:
                 bank_or_cash_ledger=args["bank_ledger"],
                 amount=float(args["amount"]),
                 narration=args.get("narration", ""),
+                transaction_type=args.get("transaction_type", ""),
+                bank_name=args.get("bank_name", ""),
+                payment_favouring=args.get("payment_favouring", ""),
+                instrument_number=args.get("instrument_number", ""),
                 tally_url=tally_url,
             )
 

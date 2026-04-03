@@ -1603,15 +1603,9 @@ def _build_inventory_entry(
 def create_sales_voucher(
     date: str,
     party_ledger: str,
-    # ── Single line-item fields (flat — one item per call) ─────────────────────
-    stock_item_name: str = "",
-    sales_ledger: str = "",
-    quantity: float = 0.0,
-    unit: str = "",
-    item_rate: float = 0.0,
-    amount: float = 0.0,
-    # ── GST fields (separate from line item) ───────────────────────────────────
-    gst_rate: float = 0.0,
+    # ── Line items (array of dicts) ────────────────────────────────────────────
+    items: list[dict[str, Any]] | None = None,
+    # ── Voucher-level GST tax ledger entries ───────────────────────────────────
     cgst_ledger: str = "",
     cgst_amount: float = 0.0,
     sgst_ledger: str = "",
@@ -1629,42 +1623,43 @@ def create_sales_voucher(
     party_gstin: str = "",
     place_of_supply: str = "",
     state_name: str = "",
+    cmp_gstin: str = "",
+    # ── Bill reference ─────────────────────────────────────────────────────────
+    bill_name: str = "",
+    bill_type: str = "New Ref",
     tally_url: str | None = None,
 ) -> dict[str, Any]:
     """
     Create a Sales (invoice) voucher in TallyPrime.
 
-    Accepts a single line item as flat fields (one item per tool call):
+    Uses <TYPE>Data</TYPE> + <ID>Vouchers</ID> envelope with SVVCHIMPORTFORMAT.
+
+    Supports multiple inventory line items via the `items` array.
+    Each item dict must have:
         stock_item_name  (str, required) — product name as in TallyPrime
         sales_ledger     (str, required) — income ledger to credit
         quantity         (float) — item quantity
         unit             (str) — unit of measure (e.g. 'Nos', 'Kg')
-        item_rate        (float) — price per unit
+        rate             (float) — price per unit
         amount           (float) — net line amount (post-discount, pre-tax)
-
-    GST fields (separate):
         gst_rate         (float) — GST % for this item (e.g. 5, 12, 18, 28; 0 if exempt)
+        hsn              (str, optional) — HSN/SAC code
+        godown           (str, optional) — godown name (default: Main Location)
+        discount_percent (float, optional) — discount %
+        discount_amount  (float, optional) — discount amount
+
+    GST tax ledger entries (voucher-level):
         cgst_ledger/cgst_amount  — CGST output ledger and amount (intrastate)
         sgst_ledger/sgst_amount  — SGST output ledger and amount (intrastate)
         igst_ledger/igst_amount  — IGST output ledger and amount (interstate)
 
-    additional_ledgers: list of dicts with ledger_name, amount, is_addition (True=charge, False=deduction).
-    Party debit = net item amount + additions - deductions + GST.
-    """
-    # Build a single-item list from the flat fields
-    item_list = []
-    if stock_item_name:
-        item_list.append({
-            "stock_item_name": stock_item_name,
-            "sales_ledger": sales_ledger,
-            "amount": amount,
-            "rate": item_rate,
-            "quantity": quantity,
-            "unit": unit,
-            "gst_rate": gst_rate,
-        })
+    GST header fields:
+        party_gstin, place_of_supply, state_name, cmp_gstin, gst_registration_type
 
-    # ── Normalise additional ledgers ──────────────────────────────────────────
+    additional_ledgers: list of dicts with ledger_name, amount, is_addition.
+    Party debit = sum of item amounts + additions - deductions + GST taxes.
+    """
+    item_list = items or []
     extra_ledgers = additional_ledgers or []
 
     # ── Optional header XML ───────────────────────────────────────────────────
@@ -1673,27 +1668,114 @@ def create_sales_voucher(
     gstin_xml  = f"<PARTYGSTIN>{_xe(party_gstin)}</PARTYGSTIN>"           if party_gstin    else ""
     pos_xml    = f"<PLACEOFSUPPLY>{_xe(place_of_supply)}</PLACEOFSUPPLY>" if place_of_supply else ""
     state_xml  = f"<STATENAME>{_xe(state_name)}</STATENAME>"              if state_name     else ""
+    cmpgstin_xml = f"<CMPGSTIN>{_xe(cmp_gstin)}</CMPGSTIN>"              if cmp_gstin      else ""
 
     vch_type_safe = _xe(voucher_type)
 
-    # ── Discount flags (voucher-level) ────────────────────────────────────────
-    def _has_discount(it: dict) -> bool:
-        return (it.get("discount_amount") not in (None, "", 0, 0.0) or
-                it.get("discount_percent") not in (None, "", 0, 0.0))
+    # ── GST Registration tag ──────────────────────────────────────────────────
+    gst_reg_tag_xml = ""
+    if gst_registration_type:
+        gst_reg_tag_xml = f"""<GSTREGISTRATION.LIST>
+                        <REGISTRATIONNAME>GST</REGISTRATIONNAME>
+                        <APPLICABLEFROM>{date}</APPLICABLEFROM>
+                        <STATE>{_xe(state_name or place_of_supply)}</STATE>
+                        <REGISTRATIONNUMBER>{_xe(cmp_gstin or '')}</REGISTRATIONNUMBER>
+                    </GSTREGISTRATION.LIST>"""
 
-    any_discount = any(_has_discount(i) for i in item_list)
-    has_discounts_xml   = "<HASDISCOUNTS>Yes</HASDISCOUNTS>"               if any_discount else ""
-    discount_format_xml = "<DISCOUNTFORMAT>Both Percentage &amp; Amount</DISCOUNTFORMAT>" if any_discount else ""
+    # ── Build ALLINVENTORYENTRIES.LIST for each item ──────────────────────────
+    inv_xml_parts = []
+    for it in item_list:
+        name    = _xe(it["stock_item_name"])
+        ledger  = _xe(it.get("sales_ledger", ""))
+        amt     = float(it.get("amount", 0))
+        rate_v  = float(it.get("rate", 0))
+        qty_v   = float(it.get("quantity", 0))
+        unit_v  = _xe(str(it.get("unit", "")))
+        godown  = _xe(str(it.get("godown", "Main Location")))
+        hsn_v   = it.get("hsn", "")
 
-    # ── Compute party debit total (uses NET amounts after item-level discounts) ─
-    base_total = sum(_item_net_amount(i) for i in item_list)
+        # Per-item GST rate
+        item_gst = float(it.get("gst_rate", 0))
+        if item_gst > 0:
+            line_cgst_rate = round(item_gst / 2, 4)
+            line_sgst_rate = round(item_gst / 2, 4)
+            line_igst_rate = item_gst
+        else:
+            line_cgst_rate = 0.0
+            line_sgst_rate = 0.0
+            line_igst_rate = 0.0
+
+        # Discount fields
+        disc_pct = it.get("discount_percent")
+        disc_amt = it.get("discount_amount")
+        disc_pct_xml       = f"<DISCOUNT>{disc_pct}</DISCOUNT>"                     if disc_pct not in (None, "", 0, 0.0) else ""
+        disc_amt_xml       = f"<DISCOUNTAMOUNT>{disc_amt}</DISCOUNTAMOUNT>"           if disc_amt not in (None, "", 0, 0.0) else ""
+        batch_disc_amt_xml = f"<BATCHDISCOUNTAMOUNT>{disc_amt}</BATCHDISCOUNTAMOUNT>" if disc_amt not in (None, "", 0, 0.0) else ""
+
+        rate_str = f"{rate_v}/{unit_v}" if unit_v else str(rate_v)
+        qty_str  = f"{qty_v} {unit_v}".strip() if unit_v else str(qty_v)
+
+        # HSN tag
+        hsn_xml = f"<HSNMASTERNAME>{_xe(hsn_v)}</HSNMASTERNAME>" if hsn_v else ""
+
+        inv_xml_parts.append(f"""<ALLINVENTORYENTRIES.LIST>
+                        <STOCKITEMNAME>{name}</STOCKITEMNAME>
+                        {hsn_xml}
+                        <GSTOVRDNTAXABILITY>Taxable</GSTOVRDNTAXABILITY>
+                        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>No</ISLASTDEEMEDPOSITIVE>
+                        <GSTOVRDNISREVCHARGEAPPL>Not Applicable</GSTOVRDNISREVCHARGEAPPL>
+                        <RATE>{rate_str}</RATE>
+                        {disc_pct_xml}
+                        <AMOUNT>{amt}</AMOUNT>
+                        {disc_amt_xml}
+                        <ACTUALQTY>{qty_str}</ACTUALQTY>
+                        <BILLEDQTY>{qty_str}</BILLEDQTY>
+                        <BATCHALLOCATIONS.LIST>
+                            <GODOWNNAME>{godown}</GODOWNNAME>
+                            <BATCHNAME>Primary Batch</BATCHNAME>
+                            <AMOUNT>{amt}</AMOUNT>
+                            {batch_disc_amt_xml}
+                            <ACTUALQTY>{qty_str}</ACTUALQTY>
+                            <BILLEDQTY>{qty_str}</BILLEDQTY>
+                        </BATCHALLOCATIONS.LIST>
+                        <ACCOUNTINGALLOCATIONS.LIST>
+                            <LEDGERNAME>{ledger}</LEDGERNAME>
+                            <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                            <AMOUNT>{amt}</AMOUNT>
+                        </ACCOUNTINGALLOCATIONS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+                            <GSTRATE>{line_cgst_rate}</GSTRATE>
+                        </RATEDETAILS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+                            <GSTRATE>{line_sgst_rate}</GSTRATE>
+                        </RATEDETAILS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+                            <GSTRATE>{line_igst_rate}</GSTRATE>
+                        </RATEDETAILS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>Cess</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Not Applicable</GSTRATEVALUATIONTYPE>
+                        </RATEDETAILS.LIST>
+                    </ALLINVENTORYENTRIES.LIST>""")
+
+    inv_xml = "\n                    ".join(inv_xml_parts)
+
+    # ── Compute party debit total ─────────────────────────────────────────────
+    base_total = sum(float(it.get("amount", 0)) for it in item_list)
     total = base_total
     for ex in extra_ledgers:
         ex_amt = float(ex["amount"])
         if ex.get("is_addition", True):
-            total += ex_amt   # Freight, Insurance etc. add to party total
+            total += ex_amt
         else:
-            total -= ex_amt   # Discount etc. reduce party total
+            total -= ex_amt
     if cgst_ledger and cgst_amount:
         total += cgst_amount
     if sgst_ledger and sgst_amount:
@@ -1701,76 +1783,126 @@ def create_sales_voucher(
     if igst_ledger and igst_amount:
         total += igst_amount
 
-    # ── Item Invoice mode ─────────────────────────────────────────────────────
-    # Each item supplies its own gst_rate; fallback rates are 0 (no voucher-level fallback)
-    inv_xml = "\n  ".join(
-        _build_inventory_entry(it, 0.0, 0.0, 0.0)
-        for it in item_list
-    )
+    # ── Party ledger entry (ISDEEMEDPOSITIVE=Yes, negative total) ─────────────
+    bill_xml = ""
+    if bill_name:
+        bill_xml = f"""
+                        <BILLALLOCATIONS.LIST>
+                            <NAME>{_xe(bill_name)}</NAME>
+                            <BILLTYPE>{_xe(bill_type)}</BILLTYPE>
+                            <AMOUNT>-{total}</AMOUNT>
+                        </BILLALLOCATIONS.LIST>"""
 
+    party_xml = f"""<LEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(party_ledger)}</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>Yes</ISLASTDEEMEDPOSITIVE>
+                        <AMOUNT>-{total}</AMOUNT>{bill_xml}
+                    </LEDGERENTRIES.LIST>"""
+
+    # ── GST tax ledger entries (ISDEEMEDPOSITIVE=No, positive amounts) ────────
     gst_xml = ""
     if cgst_ledger and cgst_amount:
-        gst_xml += f"""<LEDGERENTRIES.LIST>
-    <LEDGERNAME>{_xe(cgst_ledger)}</LEDGERNAME>
-    <METHODTYPE>GST</METHODTYPE>
-    <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-    <AMOUNT>{cgst_amount}</AMOUNT>
-  </LEDGERENTRIES.LIST>
-  """
+        gst_xml += f"""
+                    <LEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(cgst_ledger)}</LEDGERNAME>
+                        <METHODTYPE>GST</METHODTYPE>
+                        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>No</ISLASTDEEMEDPOSITIVE>
+                        <AMOUNT>{cgst_amount}</AMOUNT>
+                    </LEDGERENTRIES.LIST>"""
     if sgst_ledger and sgst_amount:
-        gst_xml += f"""<LEDGERENTRIES.LIST>
-    <LEDGERNAME>{_xe(sgst_ledger)}</LEDGERNAME>
-    <METHODTYPE>GST</METHODTYPE>
-    <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-    <AMOUNT>{sgst_amount}</AMOUNT>
-  </LEDGERENTRIES.LIST>
-  """
+        gst_xml += f"""
+                    <LEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(sgst_ledger)}</LEDGERNAME>
+                        <METHODTYPE>GST</METHODTYPE>
+                        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>No</ISLASTDEEMEDPOSITIVE>
+                        <AMOUNT>{sgst_amount}</AMOUNT>
+                    </LEDGERENTRIES.LIST>"""
     if igst_ledger and igst_amount:
-        gst_xml += f"""<LEDGERENTRIES.LIST>
-    <LEDGERNAME>{_xe(igst_ledger)}</LEDGERNAME>
-    <METHODTYPE>GST</METHODTYPE>
-    <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-    <AMOUNT>{igst_amount}</AMOUNT>
-  </LEDGERENTRIES.LIST>
-  """
+        gst_xml += f"""
+                    <LEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(igst_ledger)}</LEDGERNAME>
+                        <METHODTYPE>GST</METHODTYPE>
+                        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>No</ISLASTDEEMEDPOSITIVE>
+                        <AMOUNT>{igst_amount}</AMOUNT>
+                    </LEDGERENTRIES.LIST>"""
 
     # ── Additional non-GST ledger entries (Freight, Insurance, Discount, etc.) ─
+    extra_xml = ""
     for ex in extra_ledgers:
         ex_amt      = float(ex["amount"])
         is_addition = ex.get("is_addition", True)
         deemed_pos  = "No" if is_addition else "Yes"
         xml_amt     = ex_amt if is_addition else -ex_amt
-        gst_xml += f"""<LEDGERENTRIES.LIST>
-    <LEDGERNAME>{_xe(ex["ledger_name"])}</LEDGERNAME>
-    <ISDEEMEDPOSITIVE>{deemed_pos}</ISDEEMEDPOSITIVE>
-    <AMOUNT>{xml_amt}</AMOUNT>
-  </LEDGERENTRIES.LIST>
-  """
+        extra_xml += f"""
+                    <LEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(ex["ledger_name"])}</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>{deemed_pos}</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>{deemed_pos}</ISLASTDEEMEDPOSITIVE>
+                        <AMOUNT>{xml_amt}</AMOUNT>
+                    </LEDGERENTRIES.LIST>"""
 
-    voucher_xml = f"""<VOUCHER REMOTEID="" VCHKEY="" VCHTYPE="{vch_type_safe}" ACTION="Create" OBJVIEW="Invoice Voucher View">
-  <OBJECTUPDATEACTION>Create</OBJECTUPDATEACTION>
-  <ISINVOICE>Yes</ISINVOICE>
-  <VCHENTRYMODE>Item Invoice</VCHENTRYMODE>
-  <DATE>{date}</DATE>
-  <VOUCHERTYPENAME>{vch_type_safe}</VOUCHERTYPENAME>
-  {vnum_xml}
-  <PARTYLEDGERNAME>{_xe(party_ledger)}</PARTYLEDGERNAME>
-  {gstreg_xml}
-  {state_xml}
-  {gstin_xml}
-  {pos_xml}
-  {has_discounts_xml}
-  {discount_format_xml}
-  <NARRATION>{_xe(narration)}</NARRATION>
-  {inv_xml}
-  <LEDGERENTRIES.LIST>
-    <LEDGERNAME>{_xe(party_ledger)}</LEDGERNAME>
-    <AMOUNT>-{total}</AMOUNT>
-  </LEDGERENTRIES.LIST>
-  {gst_xml}
-</VOUCHER>"""
+    # ── Build the full XML envelope ───────────────────────────────────────────
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Import</TALLYREQUEST>
+        <TYPE>Data</TYPE>
+        <ID>Vouchers</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVVCHIMPORTFORMAT>XML</SVVCHIMPORTFORMAT>
+            </STATICVARIABLES>
+            <TALLYMESSAGE>
+                <VOUCHER VCHTYPE="{vch_type_safe}" ACTION="Create" OBJVIEW="Invoice Voucher View">
+                    <OBJECTUPDATEACTION>Create</OBJECTUPDATEACTION>
+                    <ISINVOICE>Yes</ISINVOICE>
+                    <VCHENTRYMODE>Item Invoice</VCHENTRYMODE>
+                    <DATE>{date}</DATE>
+                    <VOUCHERTYPENAME>{vch_type_safe}</VOUCHERTYPENAME>
+                    {vnum_xml}
+                    <PARTYLEDGERNAME>{_xe(party_ledger)}</PARTYLEDGERNAME>
+                    {gstreg_xml}
+                    {state_xml}
+                    {gstin_xml}
+                    {pos_xml}
+                    {cmpgstin_xml}
+                    {gst_reg_tag_xml}
+                    <NARRATION>{_xe(narration)}</NARRATION>
+                    {inv_xml}
+                    {party_xml}
+                    {gst_xml}
+                    {extra_xml}
+                </VOUCHER>
+            </TALLYMESSAGE>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
 
-    return _post_voucher(voucher_xml, tally_url)
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    created = _find_text(root, ".//CREATED", "0")
+    errors = [e.text for e in root.findall(".//LINEERROR") if e.text]
+
+    if int(created) >= 1:
+        return {
+            "status": "success",
+            "message": f"Sales voucher created on {date} for party '{party_ledger}' with {len(item_list)} item(s), total ₹{total}",
+            "created": int(created),
+        }
+    else:
+        return {
+            "status": "error",
+            "message": "TallyPrime did not confirm creation of the sales voucher.",
+            "errors": errors,
+            "raw_response": raw[:2000],
+        }
 
 
 def _build_purchase_inventory_entry(
@@ -1886,7 +2018,7 @@ def _build_purchase_inventory_entry(
 def create_purchase_voucher(
     date: str,
     party_ledger: str,
-    items: list[dict[str, Any]],
+    items: list[dict[str, Any]] | None = None,
     voucher_type: str = "Purchase",
     voucher_number: str = "",
     reference: str = "",           # supplier's bill / invoice number
@@ -1905,16 +2037,20 @@ def create_purchase_voucher(
     party_gstin: str = "",
     place_of_supply: str = "",
     state_name: str = "",
+    cmp_gstin: str = "",
     tally_url: str | None = None,
 ) -> dict[str, Any]:
     """
     Create a Purchase (invoice) voucher in TallyPrime using Item Invoice mode.
 
-    Sign conventions (from Purchase XML analysis):
-      • Inventory / accounting allocation amounts → negative  (ISDEEMEDPOSITIVE=Yes)
-      • Party LEDGERENTRIES amount → positive (supplier credited, ISDEEMEDPOSITIVE=No)
-      • GST input-tax LEDGERENTRIES amount → negative (debit to input ledger, ISDEEMEDPOSITIVE=Yes)
-      • reference → supplier bill number; creates BILLALLOCATIONS.LIST entry for payables tracking
+    Uses <TYPE>Data</TYPE> + <ID>Vouchers</ID> envelope with SVVCHIMPORTFORMAT.
+
+    Sign conventions (Purchase):
+      • Inventory ISDEEMEDPOSITIVE=Yes, amounts negative (stock debited — inward)
+      • ACCOUNTINGALLOCATIONS: ISDEEMEDPOSITIVE=Yes, amounts negative
+      • Party LEDGERENTRIES: ISDEEMEDPOSITIVE=No, ISPARTYLEDGER=Yes, amount positive
+      • GST input-tax LEDGERENTRIES: ISDEEMEDPOSITIVE=Yes, ISPARTYLEDGER=No, amounts negative
+      • reference → supplier bill number; creates BILLALLOCATIONS.LIST for payables tracking
 
     items: list of dicts, each with:
         stock_item_name  (str, required)
@@ -1924,6 +2060,8 @@ def create_purchase_voucher(
         quantity         (float, optional)
         unit             (str, optional)
         gst_rate         (float, optional) — per-line GST %
+        hsn              (str, optional) — HSN/SAC code
+        godown           (str, optional) — godown name (default: Main Location)
         discount_percent (float, optional)
         discount_amount  (float, optional) — pass as positive; negated for XML
     """
@@ -1931,26 +2069,122 @@ def create_purchase_voucher(
     extra_ledgers = additional_ledgers or []
 
     # ── Optional header XML ───────────────────────────────────────────────────
-    vnum_xml   = f"<VOUCHERNUMBER>{_xe(voucher_number)}</VOUCHERNUMBER>" if voucher_number else ""
-    ref_xml    = f"<REFERENCE>{_xe(reference)}</REFERENCE>"              if reference      else ""
-    gstreg_xml = f"<GSTREGISTRATIONTYPE>{_xe(gst_registration_type)}</GSTREGISTRATIONTYPE>" if gst_registration_type else ""
-    gstin_xml  = f"<PARTYGSTIN>{_xe(party_gstin)}</PARTYGSTIN>"           if party_gstin    else ""
-    pos_xml    = f"<PLACEOFSUPPLY>{_xe(place_of_supply)}</PLACEOFSUPPLY>" if place_of_supply else ""
-    state_xml  = f"<STATENAME>{_xe(state_name)}</STATENAME>"              if state_name     else ""
+    vnum_xml     = f"<VOUCHERNUMBER>{_xe(voucher_number)}</VOUCHERNUMBER>" if voucher_number else ""
+    ref_xml      = f"<REFERENCE>{_xe(reference)}</REFERENCE>"              if reference      else ""
+    gstreg_xml   = f"<GSTREGISTRATIONTYPE>{_xe(gst_registration_type)}</GSTREGISTRATIONTYPE>" if gst_registration_type else ""
+    gstin_xml    = f"<PARTYGSTIN>{_xe(party_gstin)}</PARTYGSTIN>"           if party_gstin    else ""
+    pos_xml      = f"<PLACEOFSUPPLY>{_xe(place_of_supply)}</PLACEOFSUPPLY>" if place_of_supply else ""
+    state_xml    = f"<STATENAME>{_xe(state_name)}</STATENAME>"              if state_name     else ""
+    cmpgstin_xml = f"<CMPGSTIN>{_xe(cmp_gstin)}</CMPGSTIN>"                if cmp_gstin      else ""
 
     vch_type_safe = _xe(voucher_type)
 
-    # ── Discount flags (voucher-level) ────────────────────────────────────────
-    def _has_discount(it: dict) -> bool:
-        return (it.get("discount_amount") not in (None, "", 0, 0.0) or
-                it.get("discount_percent") not in (None, "", 0, 0.0))
+    # ── GST Registration tag ──────────────────────────────────────────────────
+    gst_reg_tag_xml = ""
+    if gst_registration_type:
+        gst_reg_tag_xml = f"""<GSTREGISTRATION TAXTYPE="GST" TAXREGISTRATION="{_xe(cmp_gstin or '')}">{_xe(state_name or place_of_supply)} Registration</GSTREGISTRATION>
+                    <CMPGSTREGISTRATIONTYPE>{_xe(gst_registration_type)}</CMPGSTREGISTRATIONTYPE>
+                    <CMPGSTSTATE>{_xe(state_name or place_of_supply)}</CMPGSTSTATE>
+                    <COUNTRYOFRESIDENCE>India</COUNTRYOFRESIDENCE>"""
 
-    any_discount = any(_has_discount(i) for i in item_list)
-    has_discounts_xml   = "<HASDISCOUNTS>Yes</HASDISCOUNTS>"                           if any_discount else ""
-    discount_format_xml = "<DISCOUNTFORMAT>Both Percentage &amp; Amount</DISCOUNTFORMAT>" if any_discount else ""
+    # ── Build ALLINVENTORYENTRIES.LIST for each item ──────────────────────────
+    inv_xml_parts = []
+    for it in item_list:
+        name    = _xe(it["stock_item_name"])
+        ledger  = _xe(it.get("purchase_ledger", ""))
+        amt     = float(it.get("amount", 0))
+        rate_v  = float(it.get("rate", 0))
+        qty_v   = float(it.get("quantity", 0))
+        unit_v  = _xe(str(it.get("unit", "")))
+        godown  = _xe(str(it.get("godown", "Main Location")))
+        hsn_v   = it.get("hsn", "")
 
-    # ── Party (supplier) total — positive ─────────────────────────────────────
-    base_total = sum(float(i["amount"]) for i in item_list)
+        # Per-item GST rate
+        item_gst = float(it.get("gst_rate", 0))
+        if item_gst > 0:
+            line_cgst_rate = round(item_gst / 2, 4)
+            line_sgst_rate = round(item_gst / 2, 4)
+            line_igst_rate = item_gst
+        else:
+            line_cgst_rate = 0.0
+            line_sgst_rate = 0.0
+            line_igst_rate = 0.0
+
+        # Discount fields — purchase amounts are negative in XML
+        disc_pct = it.get("discount_percent")
+        disc_amt = it.get("discount_amount")
+        disc_pct_xml = f"<DISCOUNT>{disc_pct}</DISCOUNT>" if disc_pct not in (None, "", 0, 0.0) else ""
+        if disc_amt not in (None, "", 0, 0.0):
+            neg_disc = -abs(float(disc_amt))
+            disc_amt_xml       = f"<DISCOUNTAMOUNT>{neg_disc}</DISCOUNTAMOUNT>"
+            batch_disc_amt_xml = f"<BATCHDISCOUNTAMOUNT>{neg_disc}</BATCHDISCOUNTAMOUNT>"
+        else:
+            disc_amt_xml = batch_disc_amt_xml = ""
+
+        rate_str   = f"{rate_v}/{unit_v}" if unit_v else str(rate_v)
+        qty_str    = f"{qty_v} {unit_v}".strip() if unit_v else str(qty_v)
+        xml_amount = -amt  # negate for purchase XML
+
+        # HSN tag
+        hsn_xml = f"<HSNMASTERNAME>{_xe(hsn_v)}</HSNMASTERNAME>" if hsn_v else ""
+
+        inv_xml_parts.append(f"""<ALLINVENTORYENTRIES.LIST>
+                        <STOCKITEMNAME>{name}</STOCKITEMNAME>
+                        {hsn_xml}
+                        <GSTOVRDNTAXABILITY>Taxable</GSTOVRDNTAXABILITY>
+                        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>Yes</ISLASTDEEMEDPOSITIVE>
+                        <GSTOVRDNISREVCHARGEAPPL>Not Applicable</GSTOVRDNISREVCHARGEAPPL>
+                        <RATE>{rate_str}</RATE>
+                        {disc_pct_xml}
+                        <AMOUNT>{xml_amount}</AMOUNT>
+                        {disc_amt_xml}
+                        <ACTUALQTY>{qty_str}</ACTUALQTY>
+                        <BILLEDQTY>{qty_str}</BILLEDQTY>
+                        <BATCHALLOCATIONS.LIST>
+                            <GODOWNNAME>{godown}</GODOWNNAME>
+                            <BATCHNAME>Primary Batch</BATCHNAME>
+                            <DESTINATIONGODOWNNAME>{godown}</DESTINATIONGODOWNNAME>
+                            <AMOUNT>{xml_amount}</AMOUNT>
+                            {batch_disc_amt_xml}
+                            <ACTUALQTY>{qty_str}</ACTUALQTY>
+                            <BILLEDQTY>{qty_str}</BILLEDQTY>
+                        </BATCHALLOCATIONS.LIST>
+                        <ACCOUNTINGALLOCATIONS.LIST>
+                            <LEDGERNAME>{ledger}</LEDGERNAME>
+                            <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                            <ISPARTYLEDGER>No</ISPARTYLEDGER>
+                            <AMOUNT>{xml_amount}</AMOUNT>
+                        </ACCOUNTINGALLOCATIONS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+                            <GSTRATE>{line_cgst_rate}</GSTRATE>
+                        </RATEDETAILS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+                            <GSTRATE>{line_sgst_rate}</GSTRATE>
+                        </RATEDETAILS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+                            <GSTRATE>{line_igst_rate}</GSTRATE>
+                        </RATEDETAILS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>Cess</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Not Applicable</GSTRATEVALUATIONTYPE>
+                        </RATEDETAILS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>State Cess</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+                        </RATEDETAILS.LIST>
+                    </ALLINVENTORYENTRIES.LIST>""")
+
+    inv_xml = "\n                    ".join(inv_xml_parts)
+
+    # ── Compute party credit total (positive) ─────────────────────────────────
+    base_total = sum(float(i.get("amount", 0)) for i in item_list)
     total = base_total
     for ex in extra_ledgers:
         ex_amt = float(ex["amount"])
@@ -1965,125 +2199,392 @@ def create_purchase_voucher(
     if igst_ledger and igst_amount:
         total += igst_amount
 
-    # ── Inventory entries (item invoice mode) ─────────────────────────────────
-    inv_xml = "\n  ".join(
-        _build_purchase_inventory_entry(it, 0.0, 0.0, 0.0)
-        for it in item_list
-    )
+    # ── Party ledger entry (ISDEEMEDPOSITIVE=No, positive total) ──────────────
+    bill_xml = ""
+    if reference:
+        bill_xml = f"""
+                        <BILLALLOCATIONS.LIST>
+                            <NAME>{_xe(reference)}</NAME>
+                            <BILLTYPE>New Ref</BILLTYPE>
+                            <AMOUNT>{total}</AMOUNT>
+                        </BILLALLOCATIONS.LIST>"""
 
-    # ── GST LEDGERENTRIES (input tax credit) ──────────────────────────────────
-    # ISDEEMEDPOSITIVE=Yes, amounts negative (debit to GST Input ledger)
-    ledger_xml = ""
+    party_xml = f"""<LEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(party_ledger)}</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>No</ISLASTDEEMEDPOSITIVE>
+                        <ISPARTYLEDGER>Yes</ISPARTYLEDGER>
+                        <AMOUNT>{total}</AMOUNT>{bill_xml}
+                    </LEDGERENTRIES.LIST>"""
+
+    # ── GST tax ledger entries (ISDEEMEDPOSITIVE=Yes, negative amounts) ───────
+    gst_xml = ""
     if cgst_ledger and cgst_amount:
-        ledger_xml += f"""<LEDGERENTRIES.LIST>
-    <LEDGERNAME>{_xe(cgst_ledger)}</LEDGERNAME>
-    <METHODTYPE>GST</METHODTYPE>
-    <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-    <AMOUNT>-{cgst_amount}</AMOUNT>
-  </LEDGERENTRIES.LIST>
-  """
+        gst_xml += f"""
+                    <LEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(cgst_ledger)}</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>Yes</ISLASTDEEMEDPOSITIVE>
+                        <ISPARTYLEDGER>No</ISPARTYLEDGER>
+                        <AMOUNT>-{cgst_amount}</AMOUNT>
+                    </LEDGERENTRIES.LIST>"""
     if sgst_ledger and sgst_amount:
-        ledger_xml += f"""<LEDGERENTRIES.LIST>
-    <LEDGERNAME>{_xe(sgst_ledger)}</LEDGERNAME>
-    <METHODTYPE>GST</METHODTYPE>
-    <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-    <AMOUNT>-{sgst_amount}</AMOUNT>
-  </LEDGERENTRIES.LIST>
-  """
+        gst_xml += f"""
+                    <LEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(sgst_ledger)}</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>Yes</ISLASTDEEMEDPOSITIVE>
+                        <ISPARTYLEDGER>No</ISPARTYLEDGER>
+                        <AMOUNT>-{sgst_amount}</AMOUNT>
+                    </LEDGERENTRIES.LIST>"""
     if igst_ledger and igst_amount:
-        ledger_xml += f"""<LEDGERENTRIES.LIST>
-    <LEDGERNAME>{_xe(igst_ledger)}</LEDGERNAME>
-    <METHODTYPE>GST</METHODTYPE>
-    <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-    <AMOUNT>-{igst_amount}</AMOUNT>
-  </LEDGERENTRIES.LIST>
-  """
+        gst_xml += f"""
+                    <LEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(igst_ledger)}</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>Yes</ISLASTDEEMEDPOSITIVE>
+                        <ISPARTYLEDGER>No</ISPARTYLEDGER>
+                        <AMOUNT>-{igst_amount}</AMOUNT>
+                    </LEDGERENTRIES.LIST>"""
 
     # ── Additional non-GST ledger entries ─────────────────────────────────────
-    # is_addition=True  → expense/charge (debit): ISDEEMEDPOSITIVE=Yes, amount negative
-    # is_addition=False → income/deduction (credit): ISDEEMEDPOSITIVE=No, amount positive
+    extra_xml = ""
     for ex in extra_ledgers:
         ex_amt      = float(ex["amount"])
         is_addition = ex.get("is_addition", True)
         deemed_pos  = "Yes" if is_addition else "No"
         xml_amt     = -ex_amt if is_addition else ex_amt
-        ledger_xml += f"""<LEDGERENTRIES.LIST>
-    <LEDGERNAME>{_xe(ex["ledger_name"])}</LEDGERNAME>
-    <ISDEEMEDPOSITIVE>{deemed_pos}</ISDEEMEDPOSITIVE>
-    <AMOUNT>{xml_amt}</AMOUNT>
-  </LEDGERENTRIES.LIST>
-  """
+        extra_xml += f"""
+                    <LEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(ex["ledger_name"])}</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>{deemed_pos}</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>{deemed_pos}</ISLASTDEEMEDPOSITIVE>
+                        <ISPARTYLEDGER>No</ISPARTYLEDGER>
+                        <AMOUNT>{xml_amt}</AMOUNT>
+                    </LEDGERENTRIES.LIST>"""
 
-    # ── Bill allocation (for payables tracking) ───────────────────────────────
-    bill_alloc_xml = ""
-    if reference:
-        bill_alloc_xml = f"""<BILLALLOCATIONS.LIST>
-      <NAME>{_xe(reference)}</NAME>
-      <BILLTYPE>New Ref</BILLTYPE>
-      <AMOUNT>{total}</AMOUNT>
-    </BILLALLOCATIONS.LIST>"""
+    # ── Build the full XML envelope ───────────────────────────────────────────
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Import</TALLYREQUEST>
+        <TYPE>Data</TYPE>
+        <ID>Vouchers</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVVCHIMPORTFORMAT>XML</SVVCHIMPORTFORMAT>
+            </STATICVARIABLES>
+            <TALLYMESSAGE>
+                <VOUCHER VCHTYPE="{vch_type_safe}" ACTION="Create" OBJVIEW="Invoice Voucher View">
+                    <DATE>{date}</DATE>
+                    {gstreg_xml}
+                    {state_xml}
+                    {gstin_xml}
+                    {pos_xml}
+                    {cmpgstin_xml}
+                    {gst_reg_tag_xml}
+                    <VOUCHERTYPENAME>{vch_type_safe}</VOUCHERTYPENAME>
+                    {vnum_xml}
+                    {ref_xml}
+                    <PARTYLEDGERNAME>{_xe(party_ledger)}</PARTYLEDGERNAME>
+                    <PARTYNAME>{_xe(party_ledger)}</PARTYNAME>
+                    <BASICBASEPARTYNAME>{_xe(party_ledger)}</BASICBASEPARTYNAME>
+                    <PARTYMAILINGNAME>{_xe(party_ledger)}</PARTYMAILINGNAME>
+                    <PERSISTEDVIEW>Invoice Voucher View</PERSISTEDVIEW>
+                    <VCHENTRYMODE>Item Invoice</VCHENTRYMODE>
+                    <EFFECTIVEDATE>{date}</EFFECTIVEDATE>
+                    <ISINVOICE>Yes</ISINVOICE>
+                    <NARRATION>{_xe(narration)}</NARRATION>
+                    {inv_xml}
+                    {party_xml}
+                    {gst_xml}
+                    {extra_xml}
+                </VOUCHER>
+            </TALLYMESSAGE>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
 
-    voucher_xml = f"""<VOUCHER REMOTEID="" VCHKEY="" VCHTYPE="{vch_type_safe}" ACTION="Create" OBJVIEW="Invoice Voucher View">
-  <OBJECTUPDATEACTION>Create</OBJECTUPDATEACTION>
-  <ISINVOICE>Yes</ISINVOICE>
-  <VCHENTRYMODE>Item Invoice</VCHENTRYMODE>
-  <DATE>{date}</DATE>
-  <VOUCHERTYPENAME>{vch_type_safe}</VOUCHERTYPENAME>
-  {vnum_xml}
-  {ref_xml}
-  <PARTYLEDGERNAME>{_xe(party_ledger)}</PARTYLEDGERNAME>
-  {gstreg_xml}
-  {state_xml}
-  {gstin_xml}
-  {pos_xml}
-  {has_discounts_xml}
-  {discount_format_xml}
-  <NARRATION>{_xe(narration)}</NARRATION>
-  {inv_xml}
-  <LEDGERENTRIES.LIST>
-    <LEDGERNAME>{_xe(party_ledger)}</LEDGERNAME>
-    <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-    <AMOUNT>{total}</AMOUNT>
-    {bill_alloc_xml}
-  </LEDGERENTRIES.LIST>
-  {ledger_xml}
-</VOUCHER>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
 
-    return _post_voucher(voucher_xml, tally_url)
+    created = _find_text(root, ".//CREATED", "0")
+    errors = [e.text for e in root.findall(".//LINEERROR") if e.text]
+
+    if int(created) >= 1:
+        return {
+            "status": "success",
+            "message": f"Purchase voucher created on {date} for party '{party_ledger}' with {len(item_list)} item(s), total ₹{total}",
+            "created": int(created),
+        }
+    else:
+        return {
+            "status": "error",
+            "message": "TallyPrime did not confirm creation of the purchase voucher.",
+            "errors": errors,
+            "raw_response": raw[:2000],
+        }
 
 
 def create_payment_voucher(
-    date: str, party_ledger: str, bank_or_cash_ledger: str, amount: float,
-    voucher_number: str = "", narration: str = "",
+    date: str,
+    party_ledger: str,
+    bank_or_cash_ledger: str,
+    amount: float,
+    voucher_number: str = "",
+    narration: str = "",
+    bill_name: str = "",
+    bill_type: str = "New Ref",
+    transaction_type: str = "",
+    transfer_mode: str = "",
+    ifsc_code: str = "",
+    bank_name: str = "",
+    account_number: str = "",
+    instrument_number: str = "",
+    instrument_date: str = "",
+    payment_favouring: str = "",
+    email: str = "",
     tally_url: str | None = None,
 ) -> dict[str, Any]:
-    vnum_xml = f"<VOUCHERNUMBER>{voucher_number}</VOUCHERNUMBER>" if voucher_number else ""
-    return _post_voucher(f"""<VOUCHER REMOTEID="" VCHTYPE="Payment" ACTION="Create" OBJVIEW="Accounting Voucher View">
-  <DATE>{date}</DATE><VOUCHERTYPENAME>Payment</VOUCHERTYPENAME>
-  {vnum_xml}<PARTYLEDGERNAME>{party_ledger}</PARTYLEDGERNAME>
-  <NARRATION>{narration}</NARRATION>
-  <ALLLEDGERENTRIES.LIST><LEDGERNAME>{party_ledger}</LEDGERNAME>
-    <AMOUNT>-{amount}</AMOUNT><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE></ALLLEDGERENTRIES.LIST>
-  <ALLLEDGERENTRIES.LIST><LEDGERNAME>{bank_or_cash_ledger}</LEDGERNAME>
-    <AMOUNT>{amount}</AMOUNT><ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE></ALLLEDGERENTRIES.LIST>
-</VOUCHER>""", tally_url)
+    """Create a Payment voucher in TallyPrime.
+
+    Uses <TYPE>Data</TYPE> + <ID>Vouchers</ID> envelope with SVVCHIMPORTFORMAT.
+
+    Party ledger is debited (ISDEEMEDPOSITIVE=Yes, negative amount).
+    Bank/Cash ledger is credited (ISDEEMEDPOSITIVE=No, positive amount).
+
+    Optionally includes:
+      - BILLALLOCATIONS.LIST for bill-wise payment tracking
+      - BANKALLOCATIONS.LIST for bank transfer details (NEFT/RTGS/IMPS etc.)
+
+    Args:
+        date:                Payment date in YYYYMMDD format
+        party_ledger:        Supplier/party being paid
+        bank_or_cash_ledger: Bank or Cash ledger name
+        amount:              Payment amount
+        voucher_number:      Optional voucher number
+        narration:           Optional remarks
+        bill_name:           Bill reference name/number for BILLALLOCATIONS
+        bill_type:           Bill type: 'New Ref', 'Agst Ref', 'Advance' (default: New Ref)
+        transaction_type:    e.g. 'Inter Bank Transfer', 'Others'
+        transfer_mode:       e.g. 'NEFT', 'RTGS', 'IMPS', 'UPI'
+        ifsc_code:           Bank IFSC code
+        bank_name:           Beneficiary bank name
+        account_number:      Beneficiary account number
+        instrument_number:   Transaction/instrument reference number
+        instrument_date:     Instrument date YYYYMMDD (defaults to voucher date)
+        payment_favouring:   Payment in favour of (beneficiary name)
+        email:               Email for payment notification
+        tally_url:           Optional TallyPrime Gateway URL override
+    """
+    vnum_xml = f"<VOUCHERNUMBER>{_xe(voucher_number)}</VOUCHERNUMBER>" if voucher_number else ""
+
+    # Bill allocation XML (optional)
+    bill_xml = ""
+    if bill_name:
+        bill_xml = f"""
+            <BILLALLOCATIONS.LIST>
+                <NAME>{_xe(bill_name)}</NAME>
+                <BILLTYPE>{_xe(bill_type)}</BILLTYPE>
+                <AMOUNT>-{amount}</AMOUNT>
+            </BILLALLOCATIONS.LIST>"""
+
+    # Bank allocation XML (optional — for NEFT/RTGS/IMPS etc.)
+    bank_alloc_xml = ""
+    if transaction_type or transfer_mode:
+        inst_date = instrument_date or date
+        bank_alloc_xml = f"""
+            <BANKALLOCATIONS.LIST>
+                <DATE>{inst_date}</DATE>
+                <INSTRUMENTDATE>{inst_date}</INSTRUMENTDATE>
+                {f'<EMAIL>{_xe(email)}</EMAIL>' if email else ''}
+                <TRANSACTIONTYPE>{_xe(transaction_type)}</TRANSACTIONTYPE>
+                {f'<IFSCODE>{_xe(ifsc_code)}</IFSCODE>' if ifsc_code else ''}
+                {f'<BANKNAME>{_xe(bank_name)}</BANKNAME>' if bank_name else ''}
+                {f'<ACCOUNTNUMBER>{_xe(account_number)}</ACCOUNTNUMBER>' if account_number else ''}
+                {f'<PAYMENTFAVOURING>{_xe(payment_favouring or party_ledger)}</PAYMENTFAVOURING>'}
+                <TRANSACTIONNAME>Primary</TRANSACTIONNAME>
+                {f'<TRANSFERMODE>{_xe(transfer_mode)}</TRANSFERMODE>' if transfer_mode else ''}
+                {f'<INSTRUMENTNUMBER>{_xe(instrument_number)}</INSTRUMENTNUMBER>' if instrument_number else ''}
+                <PAYMENTMODE>Transacted</PAYMENTMODE>
+                <BANKPARTYNAME>{_xe(party_ledger)}</BANKPARTYNAME>
+                <AMOUNT>{amount}</AMOUNT>
+            </BANKALLOCATIONS.LIST>"""
+
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Import</TALLYREQUEST>
+        <TYPE>Data</TYPE>
+        <ID>Vouchers</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVVCHIMPORTFORMAT>XML</SVVCHIMPORTFORMAT>
+            </STATICVARIABLES>
+            <TALLYMESSAGE>
+                <VOUCHER VCHTYPE="Payment" ACTION="Create" OBJVIEW="Accounting Voucher View">
+                    <DATE>{date}</DATE>
+                    <VOUCHERTYPENAME>Payment</VOUCHERTYPENAME>
+                    {vnum_xml}
+                    <PARTYLEDGERNAME>{_xe(party_ledger)}</PARTYLEDGERNAME>
+                    <NARRATION>{_xe(narration)}</NARRATION>
+                    <ALLLEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(party_ledger)}</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                        <ISPARTYLEDGER>Yes</ISPARTYLEDGER>
+                        <AMOUNT>-{amount}</AMOUNT>{bill_xml}
+                    </ALLLEDGERENTRIES.LIST>
+                    <ALLLEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(bank_or_cash_ledger)}</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                        <ISPARTYLEDGER>Yes</ISPARTYLEDGER>
+                        <AMOUNT>{amount}</AMOUNT>{bank_alloc_xml}
+                    </ALLLEDGERENTRIES.LIST>
+                </VOUCHER>
+            </TALLYMESSAGE>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    created = _find_text(root, ".//CREATED", "0")
+    errors = [e.text for e in root.findall(".//LINEERROR") if e.text]
+
+    if int(created) >= 1:
+        return {
+            "status": "success",
+            "message": f"Payment voucher created: ₹{amount} from {bank_or_cash_ledger} to {party_ledger}.",
+            "created": created,
+            "errors": errors,
+        }
+    else:
+        return {
+            "status": "error",
+            "message": f"Failed to create payment voucher.",
+            "created": created,
+            "errors": errors or [raw[:500]],
+        }
 
 
 def create_receipt_voucher(
-    date: str, party_ledger: str, bank_or_cash_ledger: str, amount: float,
-    voucher_number: str = "", narration: str = "",
+    date: str,
+    party_ledger: str,
+    bank_or_cash_ledger: str,
+    amount: float,
+    voucher_number: str = "",
+    narration: str = "",
+    transaction_type: str = "",
+    bank_name: str = "",
+    payment_favouring: str = "",
+    instrument_number: str = "",
+    instrument_date: str = "",
     tally_url: str | None = None,
 ) -> dict[str, Any]:
-    vnum_xml = f"<VOUCHERNUMBER>{voucher_number}</VOUCHERNUMBER>" if voucher_number else ""
-    return _post_voucher(f"""<VOUCHER REMOTEID="" VCHTYPE="Receipt" ACTION="Create" OBJVIEW="Accounting Voucher View">
-  <DATE>{date}</DATE><VOUCHERTYPENAME>Receipt</VOUCHERTYPENAME>
-  {vnum_xml}<PARTYLEDGERNAME>{party_ledger}</PARTYLEDGERNAME>
-  <NARRATION>{narration}</NARRATION>
-  <ALLLEDGERENTRIES.LIST><LEDGERNAME>{bank_or_cash_ledger}</LEDGERNAME>
-    <AMOUNT>{amount}</AMOUNT><ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE></ALLLEDGERENTRIES.LIST>
-  <ALLLEDGERENTRIES.LIST><LEDGERNAME>{party_ledger}</LEDGERNAME>
-    <AMOUNT>-{amount}</AMOUNT><ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE></ALLLEDGERENTRIES.LIST>
-</VOUCHER>""", tally_url)
+    """Create a Receipt voucher in TallyPrime.
+
+    Uses <TYPE>Data</TYPE> + <ID>Vouchers</ID> envelope with SVVCHIMPORTFORMAT.
+
+    Party ledger is credited (ISDEEMEDPOSITIVE=No, positive amount).
+    Bank/Cash ledger is debited (ISDEEMEDPOSITIVE=Yes, negative amount).
+
+    Optionally includes:
+      - BANKALLOCATIONS.LIST for cheque/DD/transfer details
+
+    Args:
+        date:                Receipt date in YYYYMMDD format
+        party_ledger:        Customer/party who paid
+        bank_or_cash_ledger: Bank or Cash ledger receiving the amount
+        amount:              Receipt amount
+        voucher_number:      Optional voucher number
+        narration:           Optional remarks
+        transaction_type:    e.g. 'Cheque/DD', 'Inter Bank Transfer'
+        bank_name:           Payer bank name
+        payment_favouring:   Payment in favour of (defaults to party_ledger)
+        instrument_number:   Cheque/transaction reference number
+        instrument_date:     Instrument date YYYYMMDD (defaults to voucher date)
+        tally_url:           Optional TallyPrime Gateway URL override
+    """
+    vnum_xml = f"<VOUCHERNUMBER>{_xe(voucher_number)}</VOUCHERNUMBER>" if voucher_number else ""
+
+    # Bank allocation XML (optional — for Cheque/DD/NEFT etc.)
+    bank_alloc_xml = ""
+    if transaction_type or instrument_number:
+        inst_date = instrument_date or date
+        bank_alloc_xml = f"""
+            <BANKALLOCATIONS.LIST>
+                <DATE>{inst_date}</DATE>
+                <INSTRUMENTDATE>{inst_date}</INSTRUMENTDATE>
+                <TRANSACTIONTYPE>{_xe(transaction_type)}</TRANSACTIONTYPE>
+                {f'<BANKNAME>{_xe(bank_name)}</BANKNAME>' if bank_name else ''}
+                <PAYMENTFAVOURING>{_xe(payment_favouring or party_ledger)}</PAYMENTFAVOURING>
+                {f'<INSTRUMENTNUMBER>{_xe(instrument_number)}</INSTRUMENTNUMBER>' if instrument_number else ''}
+                <PAYMENTMODE>Transacted</PAYMENTMODE>
+                <BANKPARTYNAME>{_xe(party_ledger)}</BANKPARTYNAME>
+                <ISCONNECTEDPAYMENT>No</ISCONNECTEDPAYMENT>
+                <AMOUNT>-{amount}</AMOUNT>
+            </BANKALLOCATIONS.LIST>"""
+
+    xml = f"""<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Import</TALLYREQUEST>
+        <TYPE>Data</TYPE>
+        <ID>Vouchers</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVVCHIMPORTFORMAT>XML</SVVCHIMPORTFORMAT>
+            </STATICVARIABLES>
+            <TALLYMESSAGE xmlns:UDF="TallyUDF">
+                <VOUCHER VCHTYPE="Receipt" ACTION="Create" OBJVIEW="Accounting Voucher View">
+                    <DATE>{date}</DATE>
+                    <VOUCHERTYPENAME>Receipt</VOUCHERTYPENAME>
+                    {vnum_xml}
+                    <PARTYLEDGERNAME>{_xe(party_ledger)}</PARTYLEDGERNAME>
+                    <NARRATION>{_xe(narration)}</NARRATION>
+                    <ALLLEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(party_ledger)}</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                        <ISPARTYLEDGER>Yes</ISPARTYLEDGER>
+                        <AMOUNT>{amount}</AMOUNT>
+                    </ALLLEDGERENTRIES.LIST>
+                    <ALLLEDGERENTRIES.LIST>
+                        <LEDGERNAME>{_xe(bank_or_cash_ledger)}</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                        <ISPARTYLEDGER>Yes</ISPARTYLEDGER>
+                        <AMOUNT>-{amount}</AMOUNT>{bank_alloc_xml}
+                    </ALLLEDGERENTRIES.LIST>
+                </VOUCHER>
+            </TALLYMESSAGE>
+        </DESC>
+    </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+
+    created = _find_text(root, ".//CREATED", "0")
+    errors = [e.text for e in root.findall(".//LINEERROR") if e.text]
+
+    if int(created) >= 1:
+        return {
+            "status": "success",
+            "message": f"Receipt voucher created: ₹{amount} from {party_ledger} into {bank_or_cash_ledger}.",
+            "created": created,
+            "errors": errors,
+        }
+    else:
+        return {
+            "status": "error",
+            "message": f"Failed to create receipt voucher.",
+            "created": created,
+            "errors": errors or [raw[:500]],
+        }
 
 
 def create_journal_voucher(
