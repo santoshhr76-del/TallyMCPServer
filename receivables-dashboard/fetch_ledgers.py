@@ -8,7 +8,7 @@ import os
 import urllib.request
 import xml.etree.ElementTree as ET
 
-TALLY_URL = "http://tally.tallymcpclient.com/"
+TALLY_URL = os.environ.get("TALLY_URL", "http://localhost:9000")
 OUT_DIR   = r"C:\Users\Dell\Documents\TallyMCPServer\receivables-dashboard\output"
 RECV_PATH = os.path.join(OUT_DIR, "receivables.json")
 OUT_PATH  = os.path.join(OUT_DIR, "party_details.json")
@@ -83,9 +83,9 @@ def fetch_ledger(name: str) -> dict:
           <COLLECTION NAME="MCPLedgerDetail" ISMODIFY="No">
             <TYPE>Ledger</TYPE>
             <FETCH>Name,Parent,ClosingBalance,OpeningBalance,CurrencyName,
-                   GSTRegistrationType,PartyGSTIN,IncomeTaxNumber,
-                   LedgerPhone,Email,CreditLimit,BillCreditPeriod,IsBillWiseOn,
-                   LedMailingDetails</FETCH>
+                   IncomeTaxNumber,LedgerContact,LedgerMobile,Email,
+                   CreditLimit,BillCreditPeriod,IsBillWiseOn,
+                   LedMailingDetails,LedGSTRegDetails,ContactDetails</FETCH>
             <FILTER>MCPLedgerByName</FILTER>
           </COLLECTION>
           <SYSTEM TYPE="Formulae" NAME="MCPLedgerByName">$Name = "{safe_name}"</SYSTEM>
@@ -122,9 +122,20 @@ def fetch_ledger(name: str) -> dict:
     state   = (_find_text(mailing, "STATE")   if mailing is not None else "") or _rx(raw, "STATE")
     country = (_find_text(mailing, "COUNTRY") if mailing is not None else "") or _rx(raw, "COUNTRY")
     pincode = (_find_text(mailing, "PINCODE") if mailing is not None else "") or _rx(raw, "PINCODE")
-    gstin   = _find_text(ledger, "PARTYGSTIN")  or _rx(raw, "PARTYGSTIN")
-    phone   = _find_text(ledger, "LEDGERPHONE") or _rx(raw, "LEDGERPHONE")
-    email   = _find_text(ledger, "EMAIL")        or _rx(raw, "EMAIL")
+
+    # Robust extraction: try direct child → any descendant (.//TAG) → raw regex.
+    # Ledger-master GSTIN is <GSTIN> (often nested in LEDGSTREGDETAILS.LIST), not
+    # the voucher-level <PARTYGSTIN>. Phone is <LEDGERMOBILE> on modern TallyPrime.
+    def _field(*tags: str) -> str:
+        for tag in tags:
+            val = _find_text(ledger, tag) or _find_text(ledger, f".//{tag}") or _rx(raw, tag)
+            if val:
+                return val
+        return ""
+
+    gstin   = _field("GSTIN", "PARTYGSTIN")
+    phone   = _field("LEDGERMOBILE", "LEDGERPHONE", "PHONENUMBER")
+    email   = _field("EMAIL")
 
     return {
         "gstin":     gstin,
@@ -178,14 +189,4 @@ for party_name, outstanding in party_outstanding.items():
             "state":       info.get("state", ""),
             "pincode":     pin,
             "addresses":   info.get("addresses", []),
-            "phone":       info.get("phone", ""),
-            "email":       info.get("email", ""),
-            "outstanding": outstanding,
-        })
-
-with open(OUT_PATH, "w", encoding="utf-8") as f:
-    json.dump(party_details, f, indent=2, ensure_ascii=False)
-
-total = len(party_details)
-print(f"\nParty details fetched -- {total} parties, {with_pin} with pin codes, {missing_pin} missing pin codes")
-print(f"Saved to: {OUT_PATH}")
+            "phone":     

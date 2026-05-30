@@ -1,0 +1,36 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  Cloudflared NAMED tunnel — TallyPrime MCP Server
+# ──────────────────────────────────────────────────────────────────────────
+#  Copy this file to:  %USERPROFILE%\.cloudflared\config.yml
+#  Then fill in your tunnel UUID and the path to its credentials JSON.
+#
+#  How to get the values:
+#    1) cloudflared tunnel login
+#    2) cloudflared tunnel create tally-mcp
+#       → prints "Created tunnel tally-mcp with id <UUID>"
+#       → also writes credentials to %USERPROFILE%\.cloudflared\<UUID>.json
+#    3) cloudflared tunnel route dns tally-mcp tally.tallymcpclient.com
+#
+#  After saving config.yml run:
+#    cloudflared tunnel run tally-mcp
+#  (or just use scripts\start-tunnel.bat)
+# ──────────────────────────────────────────────────────────────────────────
+
+# UUID printed by `cloudflared tunnel create`.
+tunnel: REPLACE_WITH_TUNNEL_UUID
+
+# Path to the credentials JSON. Use forward slashes or escaped backslashes.
+# Default location: %USERPROFILE%\.cloudflared\<UUID>.json
+credentials-file: C:/Users/Dell/.cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+# Suppress automatic updates so the tunnel doesn't restart unexpectedly.
+no-autoupdate: true
+
+# Ingress rules — first match wins, the wildcard is mandatory.
+ingress:
+  # Public name → MCP server on this laptop.
+  - hostname: tally.tallymcpclient.com
+    service: http://localhost:8000
+
+  # Catch-all (required by cloudflared).
+  - service: http_status:404

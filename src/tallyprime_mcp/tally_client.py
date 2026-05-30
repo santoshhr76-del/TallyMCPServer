@@ -299,9 +299,9 @@ def fetch_ledger(name: str, tally_url: str | None = None) -> dict[str, Any]:
           <COLLECTION NAME="MCPLedgerDetail" ISMODIFY="No">
             <TYPE>Ledger</TYPE>
             <FETCH>Name,Parent,ClosingBalance,OpeningBalance,CurrencyName,
-                   GSTRegistrationType,PartyGSTIN,IncomeTaxNumber,
-                   LedgerMobile,Email,CreditLimit,BillCreditPeriod,IsBillWiseOn,
-                   LedMailingDetails</FETCH>
+                   IncomeTaxNumber,LedgerContact,LedgerMobile,Email,
+                   CreditLimit,BillCreditPeriod,IsBillWiseOn,
+                   LedMailingDetails,LedGSTRegDetails,ContactDetails</FETCH>
             <FILTER>MCPLedgerByName</FILTER>
           </COLLECTION>
           <SYSTEM TYPE="Formulae" NAME="MCPLedgerByName">$Name = "{safe_name}"</SYSTEM>
@@ -340,17 +340,20 @@ def fetch_ledger(name: str, tally_url: str | None = None) -> dict[str, Any]:
     country = (_find_text(mailing, "COUNTRY") if mailing is not None else "") or _rx(raw, "COUNTRY")
     pincode = (_find_text(mailing, "PINCODE") if mailing is not None else "") or _rx(raw, "PINCODE")
 
-    # Opening/closing balance: negative value = credit balance in Tally export format
+    # Opening/closing balance: the Dr/Cr label is derived purely from the sign
+    # of the amount TallyPrime returns, which is consistent for every ledger
+    # regardless of its parent group (Sundry Debtors, Creditors, etc.):
+    #   negative value -> Dr,  positive value -> Cr.
     def _fmt_balance(val: str) -> str:
-        """Convert Tally's numeric balance to a human-readable string with Dr/Cr suffix."""
+        """Convert Tally's signed numeric balance to a Dr/Cr string (sign-based, group-independent)."""
         v = val.strip()
         if not v or v == "0" or v == "0.00":
             return "0.00"
         try:
             n = float(v)
             if n < 0:
-                return f"{abs(n):.2f} Cr"
-            return f"{n:.2f} Dr"
+                return f"{abs(n):.2f} Dr"
+            return f"{n:.2f} Cr"
         except ValueError:
             return v  # already has Dr/Cr or is non-numeric — return as-is
 
@@ -361,20 +364,49 @@ def fetch_ledger(name: str, tally_url: str | None = None) -> dict[str, Any]:
         _find_text(ledger, "CLOSINGBALANCE") or _rx(raw, "CLOSINGBALANCE")
     )
 
+    # ── Robust field extraction ──────────────────────────────────────────────
+    # TallyPrime stores some master fields nested inside sub-lists (e.g. the
+    # GST identification number lives in <GSTIN> inside LEDGSTREGDETAILS.LIST,
+    # NOT in the voucher-level <PARTYGSTIN> tag). So for each field we try, in
+    # order: a direct child, any descendant (.//TAG), then a regex over the raw
+    # XML. The first non-empty match wins. Tag names confirmed from the Tally
+    # ledger-master XML export: GSTIN, LEDGERMOBILE, EMAIL, INCOMETAXNUMBER.
+    def _field(*tags: str) -> str:
+        for tag in tags:
+            val = (
+                _find_text(ledger, tag)
+                or _find_text(ledger, f".//{tag}")
+                or _rx(raw, tag)
+            )
+            if val:
+                return val
+        return ""
+
+    # Contact-person name: top-level <LEDGERCONTACT> mirrors the value, but the
+    # authoritative source is <NAME> inside <CONTACTDETAILS.LIST>. We must scope
+    # the NAME lookup to that sub-list — a bare _field("NAME") would return the
+    # ledger's own name instead.
+    contact = ledger.find("CONTACTDETAILS.LIST")
+    contact_person = (
+        _find_text(ledger, "LEDGERCONTACT")
+        or (_find_text(contact, "NAME") if contact is not None else "")
+        or _rx(raw, "LEDGERCONTACT")
+    )
+
     return {
         "name":                 ledger.get("NAME") or _find_text(ledger, "NAME") or _rx(raw, "NAME"),
         "parent":               _find_text(ledger, "PARENT")                or _rx(raw, "PARENT"),
         "opening_balance":      opening_balance,
         "closing_balance":      closing_balance,
         "currency":             _find_text(ledger, "CURRENCYNAME")          or _rx(raw, "CURRENCYNAME"),
-        "gst_registration_type":_find_text(ledger, "GSTREGISTRATIONTYPE")  or _rx(raw, "GSTREGISTRATIONTYPE"),
-        "gstin":                _find_text(ledger, "PARTYGSTIN")            or _rx(raw, "PARTYGSTIN"),
-        "pan":                  _find_text(ledger, "INCOMETAXNUMBER")       or _rx(raw, "INCOMETAXNUMBER"),
-        "phone":                (_find_text(mailing, "PHONENUMBER") if mailing is not None else "")
-                                or _find_text(ledger, "LEDGERMOBILE")
-                                or _rx(raw, "PHONENUMBER")
-                                or _rx(raw, "LEDGERMOBILE"),
-        "email":                _find_text(ledger, "EMAIL")                 or _rx(raw, "EMAIL"),
+        "gst_registration_type":_field("GSTREGISTRATIONTYPE"),
+        # Ledger-master GSTIN is <GSTIN>; fall back to the voucher-level
+        # <PARTYGSTIN> tag for older TallyPrime versions / cached masters.
+        "gstin":                _field("GSTIN", "PARTYGSTIN"),
+        "pan":                  _field("INCOMETAXNUMBER", "LEDGERPAN"),
+        "phone":                _field("LEDGERMOBILE", "LEDGERPHONE", "PHONENUMBER"),
+        "email":                _field("EMAIL"),
+        "contact_person":       contact_person,
         "addresses":            addresses,
         "state":                state,
         "country":              country,
@@ -1623,10 +1655,23 @@ def create_sales_voucher(
     party_gstin: str = "",
     place_of_supply: str = "",
     state_name: str = "",
+    country: str = "India",        # Buyer's country → <COUNTRYOFRESIDENCE> + <CONSIGNEECOUNTRYNAME>
     cmp_gstin: str = "",
     # ── Bill reference ─────────────────────────────────────────────────────────
     bill_name: str = "",
     bill_type: str = "New Ref",
+    # ── E-Invoice (IRN) fields — written into TallyPrime's dedicated tags ─────
+    irn: str = "",
+    irn_qr_code: str = "",
+    irn_ack_no: str = "",
+    irn_ack_date: str = "",        # YYYYMMDD (8 digits)
+    irn_ack_datetime: str = "",    # YYYYMMDDHHMMSSsss (17 digits)
+    # ── E-Way Bill fields — written into <EWAYBILLDETAILS.LIST> ──────────────
+    ewb_no: str = "",              # NIC EwbNo
+    ewb_date: str = "",            # YYYYMMDD (8 digits)
+    ewb_veh_no: str = "",          # vehicle number (e.g. KA01AB1234)
+    ewb_trans_mode: str = "1",     # 1=Road, 2=Rail, 3=Air, 4=Ship
+    ewb_veh_type: str = "R",       # R=Regular, O=Over-Dimensional Cargo
     tally_url: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -1658,6 +1703,18 @@ def create_sales_voucher(
 
     additional_ledgers: list of dicts with ledger_name, amount, is_addition.
     Party debit = sum of item amounts + additions - deductions + GST taxes.
+
+    E-Invoice fields (TallyPrime's dedicated XML tags, optional):
+        irn               → <IRN>
+        irn_qr_code       → <IRNQRCODE>            (raw signed-QR JWT)
+        irn_ack_no        → <IRNACKNO>
+        irn_ack_date      → <IRNACKDATE>           (YYYYMMDD)
+        irn_ack_datetime  → accepted for compatibility but not emitted
+
+    E-Way Bill fields (written into <EWAYBILLDETAILS.LIST>, optional):
+        ewb_no            → <BILLNUMBER>
+        ewb_date          → <BILLDATE>              (YYYYMMDD)
+        Sending ewb_no flips <ISEWAYBILLAPPLICABLE> to Yes automatically.
     """
     item_list = items or []
     extra_ledgers = additional_ledgers or []
@@ -1668,7 +1725,94 @@ def create_sales_voucher(
     gstin_xml  = f"<PARTYGSTIN>{_xe(party_gstin)}</PARTYGSTIN>"           if party_gstin    else ""
     pos_xml    = f"<PLACEOFSUPPLY>{_xe(place_of_supply)}</PLACEOFSUPPLY>" if place_of_supply else ""
     state_xml  = f"<STATENAME>{_xe(state_name)}</STATENAME>"              if state_name     else ""
+    # COUNTRYOFRESIDENCE goes right after STATENAME (per Tally exporter sample).
+    country_xml = f"<COUNTRYOFRESIDENCE>{_xe(country)}</COUNTRYOFRESIDENCE>" if country else ""
     cmpgstin_xml = f"<CMPGSTIN>{_xe(cmp_gstin)}</CMPGSTIN>"              if cmp_gstin      else ""
+    # Consignee tags — mirror the buyer's state name and country
+    # (consignee == buyer in our simple-import path).
+    consignee_state_xml   = f"<CONSIGNEESTATENAME>{_xe(state_name)}</CONSIGNEESTATENAME>"     if state_name else ""
+    consignee_country_xml = f"<CONSIGNEECOUNTRYNAME>{_xe(country)}</CONSIGNEECOUNTRYNAME>"     if country    else ""
+
+    # ── E-Invoice / IRN tags ──────────────────────────────────────────────────
+    # Match TallyPrime's exporter layout (Sales_EINVBIL-2 sample):
+    #   <IRNACKDATE>   — right after <DATE> at the top of the voucher
+    #   <IRN>          — in the upper party block (after PARTYLEDGERNAME)
+    #   <IRNQRCODE>    — placed *separately*, after the company-GSTIN block
+    #                    (Tally drops the QR if it's clustered next to <IRN>)
+    #   <IRNACKNO>,
+    #   <IRNIRPSOURCE> — clustered after the QR
+    # IRNACKUPDATEDATETIME is intentionally omitted.
+    # We only emit a tag if a value was supplied.
+    irn_ack_date_xml = (
+        f"<IRNACKDATE>{_xe(str(irn_ack_date))}</IRNACKDATE>"
+        if irn_ack_date else ""
+    )
+    # Upper-block IRN tag (just <IRN>)
+    irn_xml = f"<IRN>{_xe(irn)}</IRN>" if irn else ""
+    # Standalone <IRNQRCODE> on its own line, far from <IRN>.
+    # RESETIRNQRCODE=No is critical: without it Tally treats the import as a
+    # "regenerate QR" request and silently drops the QR string we just sent.
+    # IRNJSONEXPORTED / IRNCANCELLED keep Tally's e-invoice state machine sane.
+    if irn_qr_code:
+        irn_qrcode_xml = (
+            f"<IRNQRCODE>{_xe(irn_qr_code)}</IRNQRCODE>\n                    "
+            f"<RESETIRNQRCODE>No</RESETIRNQRCODE>\n                    "
+            f"<IRNJSONEXPORTED>No</IRNJSONEXPORTED>\n                    "
+            f"<IRNCANCELLED>No</IRNCANCELLED>"
+        )
+    else:
+        irn_qrcode_xml = ""
+    # AckNo + IRPSource, placed together near the QR
+    irn_ackno_parts = []
+    if irn_ack_no:
+        irn_ackno_parts.append(f"<IRNACKNO>{_xe(str(irn_ack_no))}</IRNACKNO>")
+    # NIC1 = NIC's primary IRP (einv1api). NIC2 would be einv2api.
+    if irn or irn_ack_no:
+        irn_ackno_parts.append("<IRNIRPSOURCE>NIC1</IRNIRPSOURCE>")
+    irn_ackno_xml = "\n                    ".join(irn_ackno_parts)
+
+    # ── E-Way Bill block ──────────────────────────────────────────────────────
+    # TallyPrime stores EWB data inside <EWAYBILLDETAILS.LIST> rather than as
+    # direct children of <VOUCHER>. Sample exporter layout:
+    #   <EWAYBILLDETAILS.LIST>
+    #     <BILLDATE>YYYYMMDD</BILLDATE>
+    #     <BILLNUMBER>...</BILLNUMBER>
+    #   </EWAYBILLDETAILS.LIST>
+    # We also flip <ISEWAYBILLAPPLICABLE> to Yes so Tally treats the voucher
+    # as EWB-bearing.
+    ewb_xml = ""
+    ewb_applicable_xml = ""
+    if ewb_no:
+        ewb_inner_parts = []
+        if ewb_date:
+            ewb_inner_parts.append(f"<BILLDATE>{_xe(str(ewb_date))}</BILLDATE>")
+        ewb_inner_parts.append(f"<BILLNUMBER>{_xe(str(ewb_no))}</BILLNUMBER>")
+
+        # Optional <TRANSPORTDETAILS.LIST> — emitted only when we have a
+        # vehicle number. Tally formats these as "code - label" pairs:
+        #   TRANSPORTMODE: "1 - Road" / "2 - Rail" / "3 - Air" / "4 - Ship"
+        #   VEHICLETYPE:   "R - Regular" / "O - Over Dimensional Cargo"
+        if ewb_veh_no:
+            mode_map = {"1": "1 - Road", "2": "2 - Rail",
+                        "3": "3 - Air",  "4": "4 - Ship"}
+            type_map = {"R": "R - Regular", "O": "O - Over Dimensional Cargo"}
+            mode_str = mode_map.get(str(ewb_trans_mode), "1 - Road")
+            type_str = type_map.get(str(ewb_veh_type),  "R - Regular")
+            transport_xml = (
+                "<TRANSPORTDETAILS.LIST>\n                            "
+                f"<TRANSPORTMODE>{_xe(mode_str)}</TRANSPORTMODE>\n                            "
+                f"<VEHICLENUMBER>{_xe(ewb_veh_no)}</VEHICLENUMBER>\n                            "
+                f"<VEHICLETYPE>{_xe(type_str)}</VEHICLETYPE>\n                        "
+                "</TRANSPORTDETAILS.LIST>"
+            )
+            ewb_inner_parts.append(transport_xml)
+
+        ewb_xml = (
+            "<EWAYBILLDETAILS.LIST>\n                        "
+            + "\n                        ".join(ewb_inner_parts)
+            + "\n                    </EWAYBILLDETAILS.LIST>"
+        )
+        ewb_applicable_xml = "<ISEWAYBILLAPPLICABLE>Yes</ISEWAYBILLAPPLICABLE>"
 
     vch_type_safe = _xe(voucher_type)
 
@@ -1864,16 +2008,25 @@ def create_sales_voucher(
                     <ISINVOICE>Yes</ISINVOICE>
                     <VCHENTRYMODE>Item Invoice</VCHENTRYMODE>
                     <DATE>{date}</DATE>
+                    {irn_ack_date_xml}
                     <VOUCHERTYPENAME>{vch_type_safe}</VOUCHERTYPENAME>
                     {vnum_xml}
                     <PARTYLEDGERNAME>{_xe(party_ledger)}</PARTYLEDGERNAME>
+                    {irn_xml}
                     {gstreg_xml}
                     {state_xml}
+                    {country_xml}
                     {gstin_xml}
                     {pos_xml}
                     {cmpgstin_xml}
                     {gst_reg_tag_xml}
+                    {consignee_state_xml}
+                    {consignee_country_xml}
+                    {irn_qrcode_xml}
+                    {irn_ackno_xml}
+                    {ewb_applicable_xml}
                     <NARRATION>{_xe(narration)}</NARRATION>
+                    {ewb_xml}
                     {inv_xml}
                     {party_xml}
                     {gst_xml}
@@ -4325,42 +4478,4 @@ def fetch_outstanding_receivables(
                 "due_date":    b["due_date"],
                 "opening":     b["opening"],
                 "outstanding": b["outstanding"],
-                "days_overdue":b["days_overdue"],
-            }
-            for b in bills if b["party"] == party
-        ]
-        p_outstanding = round(party_totals.get(party, sum(x["outstanding"] for x in party_bills)), 2)
-        p_opening     = round(party_opening.get(party, sum(x["opening"] for x in party_bills)), 2)
-        bills_by_party.append({
-            "party":       party,
-            "opening":     p_opening,
-            "outstanding": p_outstanding,
-            "bill_count":  len(party_bills),
-            "bills":       party_bills,
-        })
-
-    # Summary sorted highest outstanding first (for quick overview)
-    party_summary = [
-        {
-            "party":       p["party"],
-            "opening":     p["opening"],
-            "outstanding": p["outstanding"],
-            "bill_count":  p["bill_count"],
-        }
-        for p in sorted(bills_by_party, key=lambda x: -x["outstanding"])
-    ]
-
-    result: dict[str, Any] = {
-        "as_of_date":        to_date_8,
-        "from_date":         _parse_date(from_date) if from_date else "",
-        "total_opening":     total_opening,
-        "total_outstanding": total_outstanding,
-        "party_count":       len(bills_by_party),
-        "bill_count":        len(bills),
-        "party_summary":     party_summary,
-        "aging_summary":     {k: round(v, 2) for k, v in aging.items()},
-        "bills_by_party":    bills_by_party,
-        "tally_url":         _resolve_url(tally_url),
-    }
-
-    return result
+                "days_overdue":b["days_ov

@@ -1,0 +1,28 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  Cloudflared NAMED tunnel — TallyPrime MCP Server (this laptop)
+#
+#  Tunnel name : tally-mcp
+#  Tunnel UUID : f2b70f47-5ad9-4a55-83ba-d04d3169a06d
+#  Public URL  : https://tally.tallymcpclient.com
+#  Forwards to : http://localhost:8000  (the MCP HTTP server)
+#
+#  This file is meant to be copied to:
+#     %USERPROFILE%\.cloudflared\config.yml
+#  Run:
+#     copy /Y "C:\Users\Dell\OneDrive\Desktop\TallyMCPServer\cloudflared\config.yml" "%USERPROFILE%\.cloudflared\config.yml"
+# ──────────────────────────────────────────────────────────────────────────
+
+tunnel: f2b70f47-5ad9-4a55-83ba-d04d3169a06d
+credentials-file: C:/Users/Dell/.cloudflared/f2b70f47-5ad9-4a55-83ba-d04d3169a06d.json
+
+# Suppress automatic updates so the tunnel doesn't restart unexpectedly.
+no-autoupdate: true
+
+# Ingress rules — first match wins, the wildcard at the end is mandatory.
+ingress:
+  # Public hostname → MCP HTTP server on this laptop.
+  - hostname: tally.tallymcpclient.com
+    service: http://localhost:8000
+
+  # Catch-all (required by cloudflared).
+  - service: http_status:404

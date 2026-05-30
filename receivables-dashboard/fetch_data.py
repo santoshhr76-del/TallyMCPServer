@@ -14,7 +14,11 @@ if SRC_DIR not in sys.path:
 
 import tallyprime_mcp.tally_client as tc
 
-TALLY_URL  = "http://tally.tallymcpclient.com"
+# Tally Gateway runs on the same laptop as this script — talk to it directly.
+# The cloudflared tunnel (https://tally.tallymcpclient.com) now fronts the MCP
+# server on port 8000, not the Tally Gateway on port 9000, so the old hostname
+# would not work for direct XML calls anymore.
+TALLY_URL  = os.environ.get("TALLY_URL", "http://localhost:9000")
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 

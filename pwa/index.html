@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <!-- Prevent aggressive browser caching so PWA updates roll out immediately -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <meta name="theme-color" content="#1565C0">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -10,7 +14,7 @@
   <meta name="apple-mobile-web-app-title" content="Tally AI">
   <title>TallyPrime Assistant</title>
 
-  <!-- Inline PWA manifest -->
+  <!-- Inline PWA manifest so the file is fully self-contained -->
   <link rel="manifest" href="data:application/manifest+json,{
     &quot;name&quot;:&quot;TallyPrime Assistant&quot;,
     &quot;short_name&quot;:&quot;Tally AI&quot;,
@@ -22,38 +26,56 @@
   }">
 
   <style>
-    /* ── Reset & Base ───────────────────────────────────────── */
+    /* ──────────────────────────────────────────────────────────
+       Reset, design tokens, and base layout
+       ────────────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
       --primary: #1565C0;
       --primary-dark: #0D47A1;
       --primary-light: #E3F2FD;
+      --primary-subtle: #EEF4FB;
+      --accent: #2196F3;
       --surface: #FFFFFF;
-      --bg: #F5F7FA;
-      --text: #1A1A2E;
-      --text-muted: #6B7280;
-      --border: #E5E7EB;
+      --surface-2: #FAFBFC;
+      --bg: #F2F5F9;
+      --text: #16203A;
+      --text-2: #4B5670;
+      --text-muted: #8B95AB;
+      --border: #E4E8EF;
+      --border-strong: #D0D7E2;
+      --success: #16A34A;
+      --warn: #F59E0B;
+      --danger: #DC2626;
       --user-bubble: #1565C0;
       --user-text: #FFFFFF;
       --bot-bubble: #FFFFFF;
-      --bot-text: #1A1A2E;
-      --shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08);
-      --radius: 18px;
-      --header-h: 64px;
-      --input-h: 72px;
+      --bot-text: #16203A;
+      --shadow-sm: 0 1px 2px rgba(20, 30, 50, 0.05), 0 1px 3px rgba(20, 30, 50, 0.06);
+      --shadow-md: 0 4px 12px rgba(20, 30, 50, 0.08), 0 2px 4px rgba(20, 30, 50, 0.06);
+      --shadow-lg: 0 10px 32px rgba(20, 30, 50, 0.12), 0 4px 12px rgba(20, 30, 50, 0.06);
+      --radius-sm: 10px;
+      --radius: 16px;
+      --radius-lg: 22px;
+      --topbar-h: 56px;
+      --bottomnav-h: 64px;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-top: env(safe-area-inset-top, 0px);
     }
 
     html, body {
       height: 100%;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Inter, sans-serif;
       background: var(--bg);
       color: var(--text);
       -webkit-tap-highlight-color: transparent;
+      overscroll-behavior: none;
     }
 
-    /* ── Layout shell ───────────────────────────────────────── */
+    /* ──────────────────────────────────────────────────────────
+       App shell
+       ────────────────────────────────────────────────────────── */
     #app {
       display: flex;
       flex-direction: column;
@@ -61,47 +83,293 @@
       max-width: 640px;
       margin: 0 auto;
       position: relative;
+      background: var(--bg);
     }
 
-    /* ── Header ────────────────────────────────────────────── */
-    #header {
-      height: var(--header-h);
+    /* Topbar */
+    #topbar {
+      height: calc(var(--topbar-h) + var(--safe-top));
+      padding-top: var(--safe-top);
       background: var(--primary);
+      color: white;
       display: flex;
       align-items: center;
-      padding: 0 16px;
+      padding-left: 16px;
+      padding-right: 8px;
       gap: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      box-shadow: 0 2px 6px rgba(13, 71, 161, 0.18);
       flex-shrink: 0;
-      z-index: 10;
+      z-index: 20;
     }
-
-    #header-icon {
-      width: 40px; height: 40px;
-      background: rgba(255,255,255,0.2);
-      border-radius: 50%;
+    #topbar .logo {
+      width: 36px; height: 36px;
+      background: rgba(255,255,255,0.16);
+      border-radius: 10px;
       display: flex; align-items: center; justify-content: center;
-      font-size: 20px;
+      font-size: 19px;
       flex-shrink: 0;
     }
-
-    #header-text { flex: 1; min-width: 0; }
-    #header-title { color: #fff; font-size: 17px; font-weight: 700; line-height: 1.2; }
-    #header-sub   { color: rgba(255,255,255,0.75); font-size: 12px; margin-top: 1px;
-                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-    #settings-btn {
-      background: transparent; border: none; cursor: pointer;
-      color: rgba(255,255,255,0.9); font-size: 22px; padding: 8px;
-      border-radius: 50%; transition: background 0.2s;
+    #topbar .title-block { flex: 1; min-width: 0; }
+    #topbar .title { font-size: 16px; font-weight: 700; line-height: 1.2; }
+    #topbar .subtitle {
+      font-size: 12px; color: rgba(255,255,255,0.78);
+      margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    #settings-btn:hover { background: rgba(255,255,255,0.15); }
+    #topbar .icon-btn {
+      width: 40px; height: 40px;
+      background: transparent;
+      border: none;
+      color: rgba(255,255,255,0.92);
+      font-size: 22px;
+      border-radius: 10px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s;
+    }
+    #topbar .icon-btn:hover { background: rgba(255,255,255,0.16); }
+    #topbar .icon-btn:active { transform: scale(0.92); }
 
-    /* ── Chat area ──────────────────────────────────────────── */
+    /* Content area = whichever tab is active */
+    #content {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+    .tab {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .tab.active { display: flex; }
+    .tab-scroll {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+    }
+
+    /* Bottom nav */
+    #bottom-nav {
+      height: calc(var(--bottomnav-h) + var(--safe-bottom));
+      padding-bottom: var(--safe-bottom);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-shrink: 0;
+      box-shadow: 0 -2px 12px rgba(20, 30, 50, 0.04);
+      z-index: 15;
+    }
+    .nav-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      padding: 6px 4px;
+      transition: color 0.15s;
+      font-family: inherit;
+      position: relative;
+    }
+    .nav-btn .nav-icon { font-size: 22px; line-height: 1; }
+    .nav-btn .nav-label { font-size: 11px; }
+    .nav-btn:active { transform: scale(0.96); }
+    .nav-btn.active { color: var(--primary); }
+    .nav-btn.active::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 32px;
+      height: 3px;
+      background: var(--primary);
+      border-radius: 0 0 3px 3px;
+    }
+
+    /* ──────────────────────────────────────────────────────────
+       Home tab
+       ────────────────────────────────────────────────────────── */
+    #tab-home .tab-scroll { padding: 16px 14px 24px; }
+
+    .company-hero {
+      background: linear-gradient(135deg, #1565C0 0%, #0D47A1 100%);
+      color: white;
+      border-radius: var(--radius-lg);
+      padding: 18px 18px 20px;
+      box-shadow: var(--shadow-md);
+      margin-bottom: 16px;
+      position: relative;
+      overflow: hidden;
+    }
+    .company-hero::after {
+      content: '';
+      position: absolute;
+      right: -40px; top: -40px;
+      width: 160px; height: 160px;
+      background: radial-gradient(circle, rgba(255,255,255,0.12), rgba(255,255,255,0));
+      border-radius: 50%;
+    }
+    .company-hero .label {
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.72);
+      font-weight: 600;
+    }
+    .company-hero .name {
+      font-size: 22px;
+      font-weight: 800;
+      margin-top: 4px;
+      line-height: 1.25;
+    }
+    .company-hero .meta {
+      font-size: 12px;
+      color: rgba(255,255,255,0.78);
+      margin-top: 8px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin: 16px 4px 10px;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .report-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 14px 14px;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.15s, border-color 0.15s;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      text-align: left;
+      font-family: inherit;
+      box-shadow: var(--shadow-sm);
+      min-height: 110px;
+      position: relative;
+    }
+    .report-card:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+    .report-card:active { transform: scale(0.97); }
+    .report-card .icon {
+      width: 38px; height: 38px;
+      border-radius: 11px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 19px;
+      flex-shrink: 0;
+    }
+    .report-card .label {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.3;
+    }
+    .report-card .hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: -2px;
+      line-height: 1.3;
+    }
+    /* Per-card icon tints */
+    .report-card[data-key="outstanding"] .icon { background: #FEF2F2; color: #DC2626; }
+    .report-card[data-key="topdebtors"] .icon  { background: #FFF7ED; color: #EA580C; }
+    .report-card[data-key="pl"] .icon          { background: #ECFDF5; color: #059669; }
+    .report-card[data-key="balance"] .icon     { background: #EEF4FB; color: #1565C0; }
+    .report-card[data-key="daybook"] .icon     { background: #F5F3FF; color: #7C3AED; }
+    .report-card[data-key="stock"] .icon       { background: #FFFBEB; color: #D97706; }
+
+    .home-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .home-actions .chip {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-2);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      box-shadow: var(--shadow-sm);
+      transition: background 0.15s;
+      font-family: inherit;
+    }
+    .home-actions .chip:hover { background: var(--primary-light); border-color: var(--primary); color: var(--primary); }
+
+    /* ──────────────────────────────────────────────────────────
+       Chat tab
+       ────────────────────────────────────────────────────────── */
+    #tab-chat { display: none; }
+    #tab-chat.active { display: flex; }
+
+    #pinned-bar {
+      flex-shrink: 0;
+      display: flex;
+      gap: 8px;
+      padding: 10px 12px;
+      overflow-x: auto;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    #pinned-bar::-webkit-scrollbar { display: none; }
+    #pinned-bar.empty { display: none; }
+    .pin-chip {
+      flex-shrink: 0;
+      background: var(--primary-subtle);
+      border: 1px solid var(--primary-light);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 7px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: inherit;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pin-chip:active { transform: scale(0.97); }
+    .pin-chip .pin-x {
+      font-size: 14px;
+      line-height: 1;
+      color: var(--text-muted);
+      padding: 0 2px;
+    }
+    .pin-chip .pin-x:hover { color: var(--danger); }
+
     #chat {
       flex: 1;
       overflow-y: auto;
-      padding: 16px 12px;
+      padding: 14px 12px;
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -109,12 +377,7 @@
       -webkit-overflow-scrolling: touch;
     }
 
-    /* ── Message bubbles ────────────────────────────────────── */
-    .msg-row {
-      display: flex;
-      flex-direction: column;
-      max-width: 82%;
-    }
+    .msg-row { display: flex; flex-direction: column; max-width: 84%; }
     .msg-row.user { align-self: flex-end; align-items: flex-end; }
     .msg-row.bot  { align-self: flex-start; align-items: flex-start; }
 
@@ -124,30 +387,30 @@
       line-height: 1.55;
       font-size: 15px;
       word-break: break-word;
-      box-shadow: var(--shadow);
-      position: relative;
+      box-shadow: var(--shadow-sm);
     }
+    .msg-row.user .bubble { background: var(--user-bubble); color: var(--user-text); border-bottom-right-radius: 5px; }
+    .msg-row.bot  .bubble { background: var(--bot-bubble); color: var(--bot-text); border-bottom-left-radius: 5px; }
 
-    .msg-row.user .bubble {
-      background: var(--user-bubble);
-      color: var(--user-text);
-      border-bottom-right-radius: 4px;
-    }
-
-    .msg-row.bot .bubble {
-      background: var(--bot-bubble);
-      color: var(--bot-text);
-      border-bottom-left-radius: 4px;
-    }
-
-    .msg-time {
+    .msg-meta {
       font-size: 11px;
       color: var(--text-muted);
       margin-top: 3px;
       padding: 0 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
+    .msg-pin {
+      cursor: pointer;
+      color: var(--text-muted);
+      padding: 2px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .msg-pin:hover { color: var(--primary); background: var(--primary-light); }
+    .msg-pin.pinned { color: var(--primary); }
 
-    /* Markdown-ish rendering in bot bubbles */
     .bubble strong { font-weight: 700; }
     .bubble em     { font-style: italic; }
     .bubble code   { font-family: 'SF Mono', Menlo, monospace; font-size: 13px;
@@ -165,7 +428,6 @@
     .bubble a      { color: var(--primary); text-decoration: underline; }
     .bubble hr     { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 
-    /* ── Tool indicator ─────────────────────────────────────── */
     .tool-badge {
       display: inline-flex;
       align-items: center;
@@ -174,13 +436,11 @@
       color: var(--text-muted);
       background: var(--bg);
       border: 1px solid var(--border);
-      border-radius: 20px;
+      border-radius: 999px;
       padding: 2px 9px;
       margin-top: 4px;
     }
-    .tool-badge-icon { font-size: 12px; }
 
-    /* ── Typing indicator ───────────────────────────────────── */
     #typing {
       display: none;
       align-self: flex-start;
@@ -189,11 +449,11 @@
       padding: 10px 14px;
       background: var(--bot-bubble);
       border-radius: var(--radius);
-      border-bottom-left-radius: 4px;
-      box-shadow: var(--shadow);
-      margin: 0 0 4px;
+      border-bottom-left-radius: 5px;
+      box-shadow: var(--shadow-sm);
+      margin: 0 12px 4px;
     }
-    #typing.visible { display: flex; }
+    #typing.visible { display: inline-flex; }
     .dot {
       width: 8px; height: 8px;
       background: var(--text-muted);
@@ -204,145 +464,442 @@
     .dot:nth-child(3) { animation-delay: 0.4s; }
     @keyframes bounce {
       0%, 60%, 100% { transform: translateY(0); }
-      30%            { transform: translateY(-6px); }
+      30%           { transform: translateY(-6px); }
     }
+    #typing-text { font-size: 12px; color: var(--text-muted); margin-left: 4px; font-style: italic; }
 
-    #typing-text {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-left: 4px;
-      font-style: italic;
-    }
-
-    /* ── Input bar ──────────────────────────────────────────── */
+    /* Input bar */
     #input-bar {
-      height: calc(var(--input-h) + var(--safe-bottom));
-      padding: 12px 12px calc(12px + var(--safe-bottom));
+      flex-shrink: 0;
       background: var(--surface);
       border-top: 1px solid var(--border);
+      padding: 10px 10px;
       display: flex;
       align-items: center;
-      gap: 10px;
-      flex-shrink: 0;
+      gap: 8px;
     }
-
     #msg-input {
       flex: 1;
       min-height: 44px;
       max-height: 120px;
-      padding: 10px 16px;
+      padding: 10px 14px;
       border: 1.5px solid var(--border);
-      border-radius: 24px;
+      border-radius: 22px;
       font-size: 15px;
       font-family: inherit;
       outline: none;
       resize: none;
-      line-height: 1.5;
+      line-height: 1.4;
+      background: var(--surface-2);
       transition: border-color 0.2s;
-      background: var(--bg);
     }
-    #msg-input:focus { border-color: var(--primary); }
-    #msg-input::placeholder { color: var(--text-muted); }
+    #msg-input:focus { border-color: var(--primary); background: var(--surface); }
 
-    #send-btn {
-      width: 46px; height: 46px;
-      background: var(--primary);
+    .iconic-btn {
+      width: 44px; height: 44px;
       border: none;
       border-radius: 50%;
       cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       flex-shrink: 0;
-      transition: background 0.2s, transform 0.1s;
-      box-shadow: 0 2px 8px rgba(21,101,192,0.4);
+      transition: transform 0.1s, background 0.15s, box-shadow 0.15s;
+      font-family: inherit;
     }
-    #send-btn:hover  { background: var(--primary-dark); }
-    #send-btn:active { transform: scale(0.93); }
-    #send-btn:disabled { background: var(--border); box-shadow: none; cursor: not-allowed; }
+    .iconic-btn:active { transform: scale(0.93); }
+    .iconic-btn svg { width: 22px; height: 22px; pointer-events: none; }
 
-    #send-btn svg { width: 20px; height: 20px; fill: white; }
-
-    /* ── Settings overlay ───────────────────────────────────── */
-    #settings-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 100;
-      align-items: flex-end;
+    #send-btn {
+      background: var(--primary);
+      box-shadow: 0 2px 8px rgba(21, 101, 192, 0.35);
     }
-    #settings-overlay.open { display: flex; }
+    #send-btn svg { fill: white; }
+    #send-btn:hover { background: var(--primary-dark); }
+    #send-btn:disabled { background: var(--border-strong); box-shadow: none; cursor: not-allowed; }
 
-    #settings-sheet {
+    #mic-btn {
       background: var(--surface);
-      border-radius: 24px 24px 0 0;
-      width: 100%;
-      max-width: 640px;
-      margin: 0 auto;
-      padding: 24px 20px calc(24px + var(--safe-bottom));
-      animation: slideUp 0.3s ease;
-    }
-    @keyframes slideUp {
-      from { transform: translateY(100%); }
-      to   { transform: translateY(0); }
-    }
-
-    .settings-handle {
-      width: 40px; height: 4px;
-      background: var(--border);
-      border-radius: 2px;
-      margin: 0 auto 20px;
-    }
-
-    .settings-title {
-      font-size: 18px; font-weight: 700; margin-bottom: 20px; color: var(--text);
-    }
-
-    .form-group { margin-bottom: 16px; }
-    .form-group label { display: block; font-size: 13px; font-weight: 600;
-                        color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .form-group input {
-      width: 100%;
-      padding: 12px 14px;
       border: 1.5px solid var(--border);
-      border-radius: 12px;
-      font-size: 15px;
-      outline: none;
-      transition: border-color 0.2s;
+      color: var(--primary);
+      -webkit-user-select: none;
+      user-select: none;
+      touch-action: none;
     }
-    .form-group input:focus { border-color: var(--primary); }
-    .form-hint { font-size: 12px; color: var(--text-muted); margin-top: 5px; }
+    #mic-btn svg { fill: currentColor; }
+    #mic-btn:hover  { background: var(--primary-light); }
+    #mic-btn.hidden { display: none; }
+    #mic-btn.recording {
+      background: #EF4444;
+      border-color: #EF4444;
+      color: white;
+      animation: micPulse 1.1s infinite;
+    }
+    @keyframes micPulse {
+      0%   { box-shadow: 0 0 0 0   rgba(239,68,68,0.55); }
+      70%  { box-shadow: 0 0 0 14px rgba(239,68,68,0); }
+      100% { box-shadow: 0 0 0 0   rgba(239,68,68,0); }
+    }
 
-    #save-btn {
+    #mic-btn.transcribing {
+      background: var(--warn);
+      border-color: var(--warn);
+      color: white;
+      animation: micSpin 1s linear infinite;
+      cursor: progress;
+    }
+    @keyframes micSpin {
+      0%   { box-shadow: 0 0 0 0   rgba(245,158,11,0.55); }
+      70%  { box-shadow: 0 0 0 10px rgba(245,158,11,0); }
+      100% { box-shadow: 0 0 0 0   rgba(245,158,11,0); }
+    }
+
+    /* ──────────────────────────────────────────────────────────
+       Vouchers tab
+       ────────────────────────────────────────────────────────── */
+    #tab-vouchers .tab-scroll { padding: 14px 14px 30px; }
+
+    .seg-tabs {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      display: flex;
+      padding: 4px;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 16px;
+    }
+    .seg-tabs button {
+      flex: 1;
+      background: transparent;
+      border: none;
+      padding: 9px 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      font-family: inherit;
+    }
+    .seg-tabs button.active {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 2px 6px rgba(21, 101, 192, 0.25);
+    }
+
+    .voucher-form {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow-sm);
+    }
+    .voucher-form.active { display: block; }
+
+    .field { margin-bottom: 12px; }
+    .field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 5px;
+    }
+    .field input, .field textarea, .field select {
       width: 100%;
-      padding: 14px;
+      padding: 10px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      font-size: 15px;
+      font-family: inherit;
+      background: var(--surface-2);
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .field input:focus, .field textarea:focus, .field select:focus {
+      border-color: var(--primary);
+      background: var(--surface);
+    }
+    .field textarea { resize: vertical; min-height: 60px; }
+    .field-row { display: flex; gap: 10px; }
+    .field-row > .field { flex: 1; }
+    .field-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+    .submit-btn {
+      width: 100%;
+      padding: 13px;
       background: var(--primary);
       color: white;
       border: none;
-      border-radius: 14px;
-      font-size: 16px;
+      border-radius: 12px;
+      font-size: 15px;
       font-weight: 700;
       cursor: pointer;
-      margin-top: 8px;
-      transition: background 0.2s;
+      transition: background 0.15s, transform 0.1s;
+      font-family: inherit;
+      box-shadow: 0 2px 8px rgba(21, 101, 192, 0.25);
+      margin-top: 6px;
     }
-    #save-btn:hover { background: var(--primary-dark); }
+    .submit-btn:hover { background: var(--primary-dark); }
+    .submit-btn:active { transform: scale(0.98); }
+    .submit-btn:disabled { background: var(--border-strong); box-shadow: none; cursor: not-allowed; }
 
-    #clear-btn {
-      width: 100%;
-      padding: 12px;
+    /* ──────────────────────────────────────────────────────────
+       E-Invoice tab
+       ────────────────────────────────────────────────────────── */
+    #tab-einvoice .tab-scroll { padding: 14px 14px 30px; }
+
+    .einv-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow-sm);
+    }
+    .einv-card h3 {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 10px;
+    }
+
+    .einv-banner {
+      background: #FFF7ED;
+      border: 1px solid #FED7AA;
+      color: #9A3412;
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .einv-banner.error  { background: #FEF2F2; border-color: #FECACA; color: #991B1B; }
+    .einv-banner.info   { background: var(--primary-subtle); border-color: var(--primary-light); color: var(--primary-dark); }
+
+    .item-row {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px 4px;
+      background: var(--surface-2);
+      margin-bottom: 10px;
+      position: relative;
+    }
+    .item-row .row-num {
+      position: absolute;
+      top: 10px; left: 12px;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 700;
+    }
+    .item-row .row-del {
+      position: absolute;
+      top: 6px; right: 6px;
+      width: 26px; height: 26px;
+      border: none;
       background: transparent;
-      color: #EF4444;
-      border: 1.5px solid #EF4444;
-      border-radius: 14px;
-      font-size: 15px;
+      color: var(--danger);
+      font-size: 16px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    .item-row .row-del:hover { background: #FEF2F2; }
+    .item-row .desc-row { margin-top: 18px; }
+
+    .add-item-btn {
+      width: 100%;
+      padding: 10px;
+      background: transparent;
+      border: 1.5px dashed var(--primary);
+      color: var(--primary);
+      border-radius: 12px;
+      font-size: 13px;
       font-weight: 600;
       cursor: pointer;
-      margin-top: 10px;
-      transition: background 0.2s;
+      font-family: inherit;
+      margin-top: 4px;
     }
-    #clear-btn:hover { background: #FEF2F2; }
+    .add-item-btn:hover { background: var(--primary-subtle); }
 
-    /* ── Setup screen ───────────────────────────────────────── */
+    .totals-bar {
+      background: linear-gradient(135deg, #1565C0 0%, #0D47A1 100%);
+      color: white;
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin: 12px 0 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .totals-bar .lbl { font-size: 12px; color: rgba(255,255,255,0.78); text-transform: uppercase; letter-spacing: 0.5px; }
+    .totals-bar .val { font-size: 22px; font-weight: 800; line-height: 1; margin-top: 2px; }
+    .totals-bar .breakdown { font-size: 11px; color: rgba(255,255,255,0.72); margin-top: 4px; }
+
+    /* IRN result */
+    .irn-result {
+      background: #ECFDF5;
+      border: 1px solid #86EFAC;
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow-sm);
+      display: none;
+    }
+    .irn-result.show  { display: block; }
+    .irn-result.error { background: #FEF2F2; border-color: #FECACA; }
+    .irn-result h3 { font-size: 14px; font-weight: 800; color: #065F46; margin-bottom: 6px; }
+    .irn-result.error h3 { color: #991B1B; }
+    .irn-result .meta { font-size: 12px; color: var(--text-2); }
+    .irn-result .irn-code {
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 11px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin: 8px 0;
+      word-break: break-all;
+    }
+    .irn-result .qr-and-actions {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      margin-top: 8px;
+    }
+    .irn-result .qr-and-actions img {
+      width: 130px; height: 130px;
+      border: 4px solid white;
+      border-radius: 8px;
+      flex-shrink: 0;
+      box-shadow: var(--shadow-sm);
+    }
+    .irn-result .actions {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .irn-result .actions button {
+      padding: 9px 12px;
+      border-radius: 9px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      border: 1.5px solid var(--primary);
+      background: white;
+      color: var(--primary);
+    }
+    .irn-result .actions button.primary {
+      background: var(--primary);
+      color: white;
+    }
+    .irn-result .actions button:active { transform: scale(0.97); }
+
+    /* History list */
+    .irn-history-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .irn-history-item:last-child { border-bottom: none; }
+    .irn-history-item .badge {
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      flex-shrink: 0;
+    }
+    .irn-history-item .badge.ok      { background: #ECFDF5; color: #065F46; border: 1px solid #86EFAC; }
+    .irn-history-item .badge.cancel  { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; }
+    .irn-history-item .info { flex: 1; min-width: 0; }
+    .irn-history-item .info .top { font-size: 13px; font-weight: 700; }
+    .irn-history-item .info .sub { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: 'SF Mono', Menlo, monospace; }
+
+    /* ──────────────────────────────────────────────────────────
+       Settings tab
+       ────────────────────────────────────────────────────────── */
+    #tab-settings .tab-scroll { padding: 14px 14px 30px; }
+
+    .setting-group {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px 4px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow-sm);
+    }
+    .setting-group h3 {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 12px;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      gap: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-row .toggle-label { font-size: 14px; color: var(--text); font-weight: 600; }
+    .toggle-row .toggle-sub   { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .toggle-switch {
+      position: relative;
+      width: 46px; height: 26px;
+      background: var(--border-strong);
+      border-radius: 26px;
+      cursor: pointer;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      top: 2px; left: 2px;
+      width: 22px; height: 22px;
+      background: white;
+      border-radius: 50%;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      transition: transform 0.2s;
+    }
+    .toggle-switch.on { background: var(--primary); }
+    .toggle-switch.on::after { transform: translateX(20px); }
+
+    .danger-btn {
+      width: 100%;
+      padding: 11px;
+      background: transparent;
+      color: var(--danger);
+      border: 1.5px solid var(--danger);
+      border-radius: 11px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 8px;
+      transition: background 0.15s;
+      font-family: inherit;
+    }
+    .danger-btn:hover { background: #FEF2F2; }
+
+    /* ──────────────────────────────────────────────────────────
+       Setup screen (first launch / no server set)
+       ────────────────────────────────────────────────────────── */
     #setup-screen {
       display: none;
       position: fixed;
@@ -355,254 +912,965 @@
       padding: 32px 24px;
     }
     #setup-screen.open { display: flex; }
-
-    .setup-logo { font-size: 64px; margin-bottom: 16px; }
-    .setup-title { color: white; font-size: 26px; font-weight: 800; margin-bottom: 8px; text-align: center; }
-    .setup-sub   { color: rgba(255,255,255,0.75); font-size: 15px; margin-bottom: 36px; text-align: center; }
-
+    .setup-logo  { font-size: 64px; margin-bottom: 14px; }
+    .setup-title { color: white; font-size: 26px; font-weight: 800; text-align: center; }
+    .setup-sub   { color: rgba(255,255,255,0.8); font-size: 14px; margin: 6px 0 28px; text-align: center; }
     .setup-card {
       background: white;
       border-radius: 20px;
-      padding: 24px;
+      padding: 22px;
       width: 100%;
-      max-width: 400px;
+      max-width: 380px;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
     }
 
-    .setup-card .form-group label { color: var(--text-muted); }
-
-    #setup-btn {
-      width: 100%;
-      padding: 14px;
-      background: var(--primary);
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: calc(var(--bottomnav-h) + var(--safe-bottom) + 16px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #16203A;
       color: white;
-      border: none;
-      border-radius: 12px;
-      font-size: 16px;
-      font-weight: 700;
-      cursor: pointer;
-      margin-top: 8px;
-    }
-
-    /* ── Scrollbar ──────────────────────────────────────────── */
-    #chat::-webkit-scrollbar { width: 4px; }
-    #chat::-webkit-scrollbar-track { background: transparent; }
-    #chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-    /* ── Suggestion chips ───────────────────────────────────── */
-    #suggestions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding: 0 12px 12px;
-    }
-    .chip {
-      background: var(--surface);
-      border: 1.5px solid var(--primary);
-      color: var(--primary);
-      border-radius: 20px;
-      padding: 7px 14px;
+      padding: 10px 18px;
+      border-radius: 24px;
       font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.15s;
-      white-space: nowrap;
+      z-index: 999;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      animation: toastIn 0.18s ease;
+      max-width: 90vw;
+      text-align: center;
     }
-    .chip:hover { background: var(--primary-light); }
+    @keyframes toastIn {
+      from { transform: translateX(-50%) translateY(20px); opacity: 0; }
+      to   { transform: translateX(-50%) translateY(0); opacity: 1; }
+    }
+
+    /* Empty states */
+    .empty {
+      padding: 32px 16px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    .empty .emoji { font-size: 38px; display: block; margin-bottom: 8px; }
+
+    /* Scrollbars (desktop) */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
   </style>
 </head>
 <body>
 
-<!-- ── Setup screen (first launch) ────────────────────────── -->
+<!-- ── Setup screen (first launch / no server set) ─────────────── -->
 <div id="setup-screen">
   <div class="setup-logo">📊</div>
   <div class="setup-title">TallyPrime Assistant</div>
   <div class="setup-sub">Your AI-powered accounting companion</div>
   <div class="setup-card">
-    <div class="form-group">
+    <div class="field">
       <label>Server URL</label>
-      <input id="setup-url" type="url" placeholder="https://tallyprime-mcp-...run.app">
-      <div class="form-hint">Your deployed TallyPrime MCP server URL</div>
+      <input id="setup-url" type="url" placeholder="https://tally.tallymcpclient.com">
+      <div class="field-hint">Your TallyPrime MCP server URL.</div>
     </div>
-    <div class="form-group">
+    <div class="field">
       <label>API Key (Bearer Token)</label>
-      <input id="setup-key" type="password" placeholder="Your bearer token">
-      <div class="form-hint">Leave blank if no auth is configured</div>
+      <input id="setup-key" type="password" placeholder="Bearer token">
+      <div class="field-hint">Leave blank if no auth is configured.</div>
     </div>
-    <button id="setup-btn" onclick="saveSetup()">Connect to TallyPrime →</button>
+    <button class="submit-btn" onclick="saveSetup()">Connect →</button>
   </div>
 </div>
 
-<!-- ── Main app ────────────────────────────────────────────── -->
+<!-- ── Main app ────────────────────────────────────────────────── -->
 <div id="app">
 
-  <!-- Header -->
-  <div id="header">
-    <div id="header-icon">📊</div>
-    <div id="header-text">
-      <div id="header-title">TallyPrime Assistant</div>
-      <div id="header-sub">Connecting…</div>
+  <!-- Topbar -->
+  <header id="topbar">
+    <div class="logo">📊</div>
+    <div class="title-block">
+      <div class="title" id="topbar-title">TallyPrime Assistant</div>
+      <div class="subtitle" id="topbar-subtitle">Connecting…</div>
     </div>
-    <button id="settings-btn" onclick="openSettings()" title="Settings">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-        <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.92c.04-.34.07-.69.07-1.08s-.03-.73-.07-1.08l2.33-1.82c.21-.16.27-.46.12-.7l-2.21-3.82c-.14-.25-.43-.33-.68-.25l-2.75 1.1c-.57-.44-1.18-.81-1.84-1.08l-.42-2.93A.56.56 0 0 0 14 2h-4c-.27 0-.5.2-.54.46l-.42 2.93c-.66.27-1.27.64-1.84 1.08l-2.75-1.1c-.25-.1-.54 0-.68.25L1.56 9.44c-.15.24-.09.54.12.7l2.33 1.82c-.04.35-.07.7-.07 1.08s.03.73.07 1.08L1.68 15.94c-.21.16-.27.46-.12.7l2.21 3.82c.14.25.43.33.68.25l2.75-1.1c.57.44 1.18.81 1.84 1.08l.42 2.93c.04.26.27.46.54.46h4c.27 0 .5-.2.54-.46l.42-2.93c.66-.27 1.27-.64 1.84-1.08l2.75 1.1c.25.1.54 0 .68-.25l2.21-3.82c.15-.24.09-.54-.12-.7l-2.33-1.82z"/>
-      </svg>
+    <button class="icon-btn" onclick="goSettings()" title="Settings" aria-label="Settings">⚙</button>
+  </header>
+
+  <!-- Content (tabs) -->
+  <main id="content">
+
+    <!-- HOME TAB -->
+    <section id="tab-home" class="tab active">
+      <div class="tab-scroll">
+        <div class="company-hero" id="company-hero">
+          <div class="label">Active Company</div>
+          <div class="name" id="company-name">Loading…</div>
+          <div class="meta" id="company-meta">Tap a tile below to fetch a report.</div>
+        </div>
+
+        <div class="section-title">Quick Reports</div>
+        <div class="card-grid">
+          <button class="report-card" data-key="outstanding" onclick="runReport('outstanding')">
+            <div class="icon">💰</div>
+            <div class="label">Outstanding Receivables</div>
+            <div class="hint">Total + party breakdown</div>
+          </button>
+          <button class="report-card" data-key="topdebtors" onclick="runReport('topdebtors')">
+            <div class="icon">🏆</div>
+            <div class="label">Top 5 Debtors</div>
+            <div class="hint">Largest balances</div>
+          </button>
+          <button class="report-card" data-key="pl" onclick="runReport('pl')">
+            <div class="icon">📈</div>
+            <div class="label">Profit &amp; Loss</div>
+            <div class="hint">This month</div>
+          </button>
+          <button class="report-card" data-key="balance" onclick="runReport('balance')">
+            <div class="icon">⚖️</div>
+            <div class="label">Balance Sheet</div>
+            <div class="hint">As of today</div>
+          </button>
+          <button class="report-card" data-key="daybook" onclick="runReport('daybook')">
+            <div class="icon">📒</div>
+            <div class="label">Day Book</div>
+            <div class="hint">Today's vouchers</div>
+          </button>
+          <button class="report-card" data-key="stock" onclick="runReport('stock')">
+            <div class="icon">📦</div>
+            <div class="label">Stock Summary</div>
+            <div class="hint">Items + value</div>
+          </button>
+        </div>
+
+        <div class="section-title">Try Asking</div>
+        <div class="home-actions">
+          <button class="chip" onclick="quickAsk('Show me trial balance for the current financial year.')">⚖️ Trial balance</button>
+          <button class="chip" onclick="quickAsk('Find a ledger by name.')">🔍 Find a ledger</button>
+          <button class="chip" onclick="quickAsk('Show me sales vouchers for this month.')">🧾 Sales this month</button>
+          <button class="chip" onclick="quickAsk('Which debtors are overdue more than 60 days?')">⏰ Aged debtors</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- CHAT TAB -->
+    <section id="tab-chat" class="tab">
+      <div id="pinned-bar" class="empty"></div>
+      <div id="chat"></div>
+      <div id="typing">
+        <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+        <span id="typing-text">Thinking…</span>
+      </div>
+      <div id="input-bar">
+        <textarea id="msg-input"
+                  rows="1"
+                  placeholder="Ask anything…"
+                  onkeydown="handleKey(event)"
+                  oninput="autoResize(this)"></textarea>
+        <button id="mic-btn" class="iconic-btn" title="Tap to talk" aria-label="Tap to start recording, tap again to send">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
+          </svg>
+        </button>
+        <button id="send-btn" class="iconic-btn" onclick="sendMessage()" title="Send" aria-label="Send">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- VOUCHERS TAB -->
+    <section id="tab-vouchers" class="tab">
+      <div class="tab-scroll">
+        <div class="seg-tabs">
+          <button class="active" data-vform="sales"   onclick="showVoucherForm('sales')">Sales</button>
+          <button             data-vform="payment" onclick="showVoucherForm('payment')">Payment</button>
+          <button             data-vform="receipt" onclick="showVoucherForm('receipt')">Receipt</button>
+        </div>
+
+        <!-- Sales form -->
+        <div id="vf-sales" class="voucher-form active">
+          <div class="field">
+            <label>Date</label>
+            <input id="vs-date" type="date">
+          </div>
+          <div class="field">
+            <label>Customer (party ledger)</label>
+            <input id="vs-party" type="text" placeholder="ABC Traders">
+          </div>
+          <div class="field">
+            <label>Sales ledger</label>
+            <input id="vs-sales-led" type="text" placeholder="GST Sales 18%">
+          </div>
+          <div class="field">
+            <label>Stock item</label>
+            <input id="vs-item" type="text" placeholder="Item name as in TallyPrime">
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Qty</label><input id="vs-qty" type="number" step="any" placeholder="1"></div>
+            <div class="field"><label>Unit</label><input id="vs-unit" type="text" placeholder="Nos"></div>
+            <div class="field"><label>Rate</label><input id="vs-rate" type="number" step="any" placeholder="100"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>GST %</label><input id="vs-gst" type="number" step="any" placeholder="18"></div>
+            <div class="field"><label>Voucher #</label><input id="vs-num" type="text" placeholder="(optional)"></div>
+          </div>
+          <div class="field">
+            <label>Narration</label>
+            <textarea id="vs-narr" placeholder="Optional notes"></textarea>
+          </div>
+          <div class="field-hint">I'll send a clear request to the assistant — it will confirm before posting in TallyPrime.</div>
+          <button class="submit-btn" onclick="submitVoucher('sales')">Review &amp; Post Sales Invoice</button>
+        </div>
+
+        <!-- Payment form -->
+        <div id="vf-payment" class="voucher-form">
+          <div class="field"><label>Date</label><input id="vp-date" type="date"></div>
+          <div class="field"><label>Pay to (party ledger)</label><input id="vp-party" type="text" placeholder="Supplier name"></div>
+          <div class="field"><label>From (bank / cash ledger)</label><input id="vp-bank" type="text" placeholder="Kotak Bank / Cash"></div>
+          <div class="field-row">
+            <div class="field"><label>Amount (₹)</label><input id="vp-amt" type="number" step="any"></div>
+            <div class="field"><label>Mode</label>
+              <select id="vp-mode">
+                <option value="">(none)</option>
+                <option value="NEFT">NEFT</option>
+                <option value="RTGS">RTGS</option>
+                <option value="IMPS">IMPS</option>
+                <option value="UPI">UPI</option>
+                <option value="Cheque">Cheque</option>
+              </select>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Reference / Cheque #</label><input id="vp-ref" type="text"></div>
+            <div class="field"><label>Voucher #</label><input id="vp-num" type="text" placeholder="(optional)"></div>
+          </div>
+          <div class="field"><label>Narration</label><textarea id="vp-narr" placeholder="Optional notes"></textarea></div>
+          <button class="submit-btn" onclick="submitVoucher('payment')">Review &amp; Post Payment</button>
+        </div>
+
+        <!-- Receipt form -->
+        <div id="vf-receipt" class="voucher-form">
+          <div class="field"><label>Date</label><input id="vr-date" type="date"></div>
+          <div class="field"><label>Received from (party ledger)</label><input id="vr-party" type="text" placeholder="Customer name"></div>
+          <div class="field"><label>Into (bank / cash ledger)</label><input id="vr-bank" type="text" placeholder="Kotak Bank / Cash"></div>
+          <div class="field-row">
+            <div class="field"><label>Amount (₹)</label><input id="vr-amt" type="number" step="any"></div>
+            <div class="field"><label>Mode</label>
+              <select id="vr-mode">
+                <option value="">(none)</option>
+                <option value="NEFT">NEFT</option>
+                <option value="RTGS">RTGS</option>
+                <option value="IMPS">IMPS</option>
+                <option value="UPI">UPI</option>
+                <option value="Cheque/DD">Cheque / DD</option>
+                <option value="Cash">Cash</option>
+              </select>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Reference</label><input id="vr-ref" type="text"></div>
+            <div class="field"><label>Voucher #</label><input id="vr-num" type="text" placeholder="(optional)"></div>
+          </div>
+          <div class="field"><label>Narration</label><textarea id="vr-narr" placeholder="Optional notes"></textarea></div>
+          <button class="submit-btn" onclick="submitVoucher('receipt')">Review &amp; Post Receipt</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- E-INVOICE TAB -->
+    <section id="tab-einvoice" class="tab">
+      <div class="tab-scroll">
+
+        <div id="einv-config-banner" class="einv-banner info" style="display:none;">
+          Set your seller defaults (GSTIN, address, state code) in
+          <strong>Settings → Seller (e-Invoice)</strong> before generating IRNs.
+        </div>
+
+        <!-- Document details -->
+        <div class="einv-card">
+          <h3>Document Details</h3>
+          <div class="field-row">
+            <div class="field"><label>Type</label>
+              <select id="ei-doc-type">
+                <option value="INV">Tax Invoice</option>
+                <option value="CRN">Credit Note</option>
+                <option value="DBN">Debit Note</option>
+              </select>
+            </div>
+            <div class="field"><label>Number</label><input id="ei-doc-no" type="text" placeholder="INV-001"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Date</label><input id="ei-doc-date" type="date"></div>
+            <div class="field"><label>Supply</label>
+              <select id="ei-supply-type">
+                <option value="B2B">B2B</option>
+                <option value="SEZWP">SEZ With Payment</option>
+                <option value="SEZWOP">SEZ Without Payment</option>
+                <option value="EXPWP">Export With Payment</option>
+                <option value="EXPWOP">Export Without Payment</option>
+                <option value="DEXP">Deemed Export</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Buyer details -->
+        <div class="einv-card">
+          <h3>Buyer</h3>
+          <div class="field"><label>GSTIN</label><input id="ei-buyer-gstin" type="text" placeholder="29ABCDE1234F1Z5" maxlength="15"></div>
+          <div class="field"><label>Legal Name</label><input id="ei-buyer-name" type="text"></div>
+          <div class="field"><label>Address Line 1</label><input id="ei-buyer-addr1" type="text"></div>
+          <div class="field"><label>Address Line 2</label><input id="ei-buyer-addr2" type="text"></div>
+          <div class="field-row">
+            <div class="field"><label>City</label><input id="ei-buyer-loc" type="text"></div>
+            <div class="field"><label>PIN</label><input id="ei-buyer-pin" type="text" maxlength="6" inputmode="numeric"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>State Code</label>
+              <select id="ei-buyer-stcd"></select>
+            </div>
+            <div class="field"><label>Place of Supply</label>
+              <select id="ei-buyer-pos"></select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Transport details (optional — generates e-Way Bill alongside IRN) -->
+        <div class="einv-card">
+          <h3>Transport (e-Way Bill)</h3>
+          <div class="field"><label>Trans Doc No</label><input id="ei-ewb-doc-no" type="text" placeholder="DOC01"></div>
+          <div class="field-row">
+            <div class="field"><label>Trans Doc Date</label><input id="ei-ewb-doc-dt" type="date"></div>
+            <div class="field"><label>Vehicle No</label><input id="ei-ewb-veh-no" type="text" placeholder="KA01AB1234"></div>
+          </div>
+          <div style="font-size:11px;color:#666;margin-top:4px;">
+            Filling any of the three above will request an e-Way Bill in the same call.
+            VehType=Regular, TransMode=Road are sent automatically.
+          </div>
+        </div>
+
+        <!-- Items -->
+        <div class="einv-card">
+          <h3>Line Items</h3>
+          <div id="ei-items"></div>
+          <button class="add-item-btn" onclick="addEinvItem()">＋ Add Item</button>
+        </div>
+
+        <!-- Totals -->
+        <div class="totals-bar">
+          <div>
+            <div class="lbl">Total Invoice Value</div>
+            <div class="val" id="ei-total-val">₹0.00</div>
+            <div class="breakdown" id="ei-total-breakdown">Taxable ₹0.00 + GST ₹0.00</div>
+          </div>
+          <div style="text-align:right;font-size:11px;color:rgba(255,255,255,0.78);" id="ei-tax-mode">
+            INTRASTATE
+          </div>
+        </div>
+
+        <button class="submit-btn" onclick="submitEinvoice()" id="ei-submit-btn">Generate IRN</button>
+
+        <!-- Result panel -->
+        <div id="ei-result" class="irn-result"></div>
+
+        <!-- History -->
+        <div class="einv-card" id="ei-history-card" style="display:none;">
+          <h3>Recent IRNs</h3>
+          <div id="ei-history-list"></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- LEDGERS TAB ─────────────────────────────────────────────── -->
+    <section id="tab-ledgers" class="tab">
+      <div class="tab-scroll">
+
+        <div class="einv-card">
+          <h3>Create Ledger in TallyPrime</h3>
+          <div class="field">
+            <label>Ledger Type</label>
+            <select id="lg-type" onchange="renderLedgerFields()">
+              <option value="party">Party — Customer / Supplier</option>
+              <option value="sales">Sales — GST Sales 18% etc.</option>
+              <option value="purchase">Purchase — GST Purchases 18% etc.</option>
+              <option value="duty">Duty — CGST / SGST / IGST / Cess</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Ledger Name *</label>
+            <input id="lg-name" type="text" placeholder="e.g. Acme Industries Pvt Ltd">
+          </div>
+          <div class="field">
+            <label>Parent Group</label>
+            <input id="lg-parent" type="text" placeholder="auto by ledger type">
+          </div>
+
+          <!-- Type-specific blocks; only one is shown at a time -->
+          <div id="lg-fields-party" class="lg-fields">
+            <div class="field-row">
+              <div class="field"><label>Opening Balance</label><input id="lg-opening" type="number" step="0.01" placeholder="0"></div>
+              <div class="field"><label>GST Reg Type</label>
+                <select id="lg-gst-reg">
+                  <option value="Regular">Regular</option>
+                  <option value="Composition">Composition</option>
+                  <option value="Consumer">Consumer</option>
+                  <option value="Unregistered/Consumer">Unregistered</option>
+                </select>
+              </div>
+            </div>
+            <div class="field"><label>GSTIN</label><input id="lg-gstin" type="text" maxlength="15" placeholder="29ABCDE1234F1Z5"></div>
+            <div class="field"><label>Address</label><textarea id="lg-address" rows="2" placeholder="Street, area"></textarea></div>
+            <div class="field-row">
+              <div class="field"><label>State</label>
+                <select id="lg-state"></select>
+              </div>
+              <div class="field"><label>PIN</label><input id="lg-pincode" type="text" maxlength="6" inputmode="numeric"></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Phone</label><input id="lg-phone" type="tel" inputmode="tel"></div>
+              <div class="field"><label>Email</label><input id="lg-email" type="email"></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Credit Period (days)</label><input id="lg-credit-period" type="text" placeholder="30 days"></div>
+              <div class="field"><label>Credit Limit</label><input id="lg-credit-limit" type="number" step="0.01" placeholder="0"></div>
+            </div>
+          </div>
+
+          <div id="lg-fields-sales" class="lg-fields" style="display:none;">
+            <div class="field-row">
+              <div class="field"><label>Effective Date *</label><input id="lg-effective-date" type="date"></div>
+              <div class="field"><label>GST Rate %</label>
+                <select id="lg-gst-rate">
+                  <option value="0">0</option>
+                  <option value="0.25">0.25</option>
+                  <option value="3">3</option>
+                  <option value="5">5</option>
+                  <option value="12">12</option>
+                  <option value="18" selected>18</option>
+                  <option value="28">28</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Type of Supply</label>
+                <select id="lg-supply-type"><option>Goods</option><option>Services</option></select>
+              </div>
+              <div class="field"><label>Taxability</label>
+                <select id="lg-taxability"><option>Taxable</option><option>Nil-Rated</option><option>Exempt</option></select>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>HSN / SAC Code</label><input id="lg-hsn" type="text" placeholder="49011010"></div>
+              <div class="field"><label>HSN Description</label><input id="lg-hsn-desc" type="text"></div>
+            </div>
+            <div class="toggle-row">
+              <label style="display:flex;align-items:center;gap:8px;"><input id="lg-rev-charge" type="checkbox"> Reverse Charge applicable</label>
+            </div>
+          </div>
+
+          <div id="lg-fields-purchase" class="lg-fields" style="display:none;">
+            <!-- Purchase mirrors Sales + an ITC ineligibility flag -->
+            <div class="field-row">
+              <div class="field"><label>Effective Date *</label><input id="lg-p-effective-date" type="date"></div>
+              <div class="field"><label>GST Rate %</label>
+                <select id="lg-p-gst-rate">
+                  <option value="0">0</option>
+                  <option value="0.25">0.25</option>
+                  <option value="3">3</option>
+                  <option value="5">5</option>
+                  <option value="12">12</option>
+                  <option value="18" selected>18</option>
+                  <option value="28">28</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>Type of Supply</label>
+                <select id="lg-p-supply-type"><option>Goods</option><option>Services</option></select>
+              </div>
+              <div class="field"><label>Taxability</label>
+                <select id="lg-p-taxability"><option>Taxable</option><option>Nil-Rated</option><option>Exempt</option></select>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label>HSN / SAC Code</label><input id="lg-p-hsn" type="text" placeholder="49011010"></div>
+              <div class="field"><label>HSN Description</label><input id="lg-p-hsn-desc" type="text"></div>
+            </div>
+            <div class="toggle-row">
+              <label style="display:flex;align-items:center;gap:8px;"><input id="lg-p-rev-charge" type="checkbox"> Reverse Charge applicable</label>
+            </div>
+            <div class="toggle-row">
+              <label style="display:flex;align-items:center;gap:8px;"><input id="lg-p-ineligible-itc" type="checkbox"> Ineligible for Input Tax Credit</label>
+            </div>
+          </div>
+
+          <div id="lg-fields-duty" class="lg-fields" style="display:none;">
+            <div class="field-row">
+              <div class="field"><label>Duty Head *</label>
+                <select id="lg-duty-head" onchange="onDutyHeadChange()">
+                  <option value="CGST">CGST</option>
+                  <option value="SGST/UTGST">SGST / UTGST</option>
+                  <option value="IGST">IGST</option>
+                  <option value="Cess">Cess</option>
+                </select>
+              </div>
+              <div class="field"><label>Rate of Tax %</label><input id="lg-duty-rate" type="number" step="0.01" placeholder="0"></div>
+            </div>
+            <div style="font-size:11px;color:#666;margin-top:4px;">
+              CGST/SGST/IGST: leave Rate at 0 — Tally resolves the % from the sales/purchase ledger.
+              For Cess, set the actual rate (e.g. 12).
+            </div>
+          </div>
+
+          <button class="submit-btn" onclick="submitLedger()" id="lg-submit-btn">Create Ledger</button>
+
+          <!-- Result panel -->
+          <div id="lg-result" class="irn-result"></div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SETTINGS TAB -->
+    <section id="tab-settings" class="tab">
+      <div class="tab-scroll">
+        <div class="setting-group">
+          <h3>Server</h3>
+          <div class="field">
+            <label>Server URL</label>
+            <input id="cfg-url" type="url" placeholder="https://tally.tallymcpclient.com">
+          </div>
+          <div class="field">
+            <label>API Key (Bearer Token)</label>
+            <input id="cfg-key" type="password" placeholder="Leave blank if no auth">
+          </div>
+          <button class="submit-btn" onclick="saveSettings()">Save</button>
+        </div>
+
+        <div class="setting-group">
+          <h3>Voice</h3>
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">🔊 Speak bot replies</div>
+              <div class="toggle-sub">Read each reply aloud (English)</div>
+            </div>
+            <div id="speak-toggle" class="toggle-switch" role="switch" aria-checked="false" tabindex="0"
+                 onclick="toggleSpeakReplies()"
+                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSpeakReplies();}"></div>
+          </div>
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">🎤 Voice input</div>
+              <div class="toggle-sub" id="voice-input-status">Tap the mic to start, tap again to send</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <h3>Seller (e-Invoice)</h3>
+          <div class="field"><label>GSTIN</label><input id="cfg-sel-gstin" type="text" maxlength="15" placeholder="29ABCDE1234F1Z5"></div>
+          <div class="field"><label>Legal Name</label><input id="cfg-sel-name" type="text"></div>
+          <div class="field"><label>Trade Name</label><input id="cfg-sel-trade" type="text" placeholder="(optional)"></div>
+          <div class="field"><label>Address Line 1</label><input id="cfg-sel-addr1" type="text"></div>
+          <div class="field"><label>Address Line 2</label><input id="cfg-sel-addr2" type="text" placeholder="(optional)"></div>
+          <div class="field-row">
+            <div class="field"><label>City</label><input id="cfg-sel-loc" type="text"></div>
+            <div class="field"><label>PIN</label><input id="cfg-sel-pin" type="text" maxlength="6" inputmode="numeric"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>State Code</label>
+              <select id="cfg-sel-stcd"></select>
+            </div>
+            <div class="field"><label>Phone</label><input id="cfg-sel-ph" type="text" placeholder="(optional)"></div>
+          </div>
+          <div class="field"><label>Email</label><input id="cfg-sel-em" type="email" placeholder="(optional)"></div>
+          <button class="submit-btn" onclick="saveEinvSeller()">Save Seller Defaults</button>
+        </div>
+
+        <div class="setting-group">
+          <h3>Pinned Questions</h3>
+          <div id="pinned-list"></div>
+          <div class="field-hint" style="padding:6px 0 10px;">Long-press (or tap the 📌) any chat reply to pin it.</div>
+        </div>
+
+        <div class="setting-group">
+          <h3>Data</h3>
+          <button class="danger-btn" onclick="clearChatHistory()">🗑 Clear Chat History</button>
+          <button class="danger-btn" onclick="clearAllData()">⚠️ Reset App (clear everything)</button>
+        </div>
+
+        <div class="setting-group">
+          <h3>About</h3>
+          <div class="toggle-row" style="border:none;">
+            <div>
+              <div class="toggle-label">TallyPrime Assistant</div>
+              <div class="toggle-sub" id="version-line">v0.2.0 — local-first PWA</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Bottom nav -->
+  <nav id="bottom-nav">
+    <button class="nav-btn active" data-tab="home"     onclick="switchTab('home')">
+      <span class="nav-icon">🏠</span><span class="nav-label">Home</span>
     </button>
-  </div>
-
-  <!-- Chat messages -->
-  <div id="chat">
-    <!-- Welcome message injected by JS -->
-  </div>
-
-  <!-- Typing indicator -->
-  <div id="typing">
-    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
-    <span id="typing-text">Thinking…</span>
-  </div>
-
-  <!-- Quick suggestions (shown initially) -->
-  <div id="suggestions">
-    <div class="chip" onclick="sendChip(this)">📋 Active company</div>
-    <div class="chip" onclick="sendChip(this)">💰 Outstanding receivables</div>
-    <div class="chip" onclick="sendChip(this)">📈 Profit &amp; Loss this year</div>
-    <div class="chip" onclick="sendChip(this)">📒 Today's day book</div>
-    <div class="chip" onclick="sendChip(this)">⚖️ Balance sheet</div>
-    <div class="chip" onclick="sendChip(this)">🔍 Find a ledger</div>
-  </div>
-
-  <!-- Input bar -->
-  <div id="input-bar">
-    <textarea id="msg-input"
-              rows="1"
-              placeholder="Ask about balances, reports, vouchers…"
-              onkeydown="handleKey(event)"
-              oninput="autoResize(this)"></textarea>
-    <button id="send-btn" onclick="sendMessage()" title="Send">
-      <svg viewBox="0 0 24 24">
-        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-      </svg>
+    <button class="nav-btn"        data-tab="chat"     onclick="switchTab('chat')">
+      <span class="nav-icon">💬</span><span class="nav-label">Chat</span>
     </button>
-  </div>
+    <button class="nav-btn"        data-tab="vouchers" onclick="switchTab('vouchers')">
+      <span class="nav-icon">🧾</span><span class="nav-label">Vouchers</span>
+    </button>
+    <button class="nav-btn"        data-tab="einvoice" onclick="switchTab('einvoice')">
+      <span class="nav-icon">📜</span><span class="nav-label">e-Inv</span>
+    </button>
+    <button class="nav-btn"        data-tab="ledgers"  onclick="switchTab('ledgers')">
+      <span class="nav-icon">📒</span><span class="nav-label">Ledgers</span>
+    </button>
+  </nav>
+
 </div>
 
-<!-- ── Settings sheet ──────────────────────────────────────── -->
-<div id="settings-overlay" onclick="overlayClick(event)">
-  <div id="settings-sheet">
-    <div class="settings-handle"></div>
-    <div class="settings-title">⚙️ Settings</div>
-
-    <div class="form-group">
-      <label>Server URL</label>
-      <input id="cfg-url" type="url" placeholder="https://your-server.run.app">
-    </div>
-    <div class="form-group">
-      <label>API Key (Bearer Token)</label>
-      <input id="cfg-key" type="password" placeholder="Leave blank if no auth">
-    </div>
-
-    <button id="save-btn" onclick="saveSettings()">Save Settings</button>
-    <button id="clear-btn" onclick="clearHistory()">🗑 Clear Chat History</button>
-  </div>
-</div>
-
-<!-- ── JavaScript ──────────────────────────────────────────── -->
+<!-- ── JavaScript ─────────────────────────────────────────────── -->
 <script>
-// ── Config (in-memory, no localStorage) ─────────────────────
-const CFG = {
-  serverUrl:   'https://tallyprime-mcp-mqup2h4wzq-el.a.run.app',
-  bearerToken: '683c7073861d17e874043e5cb39436cd1a6e8e5a421fdf0e02e7cc46c2bd02dd',
+'use strict';
+
+// ─────────────────────────────────────────────────────────────
+// Constants & Defaults
+// ─────────────────────────────────────────────────────────────
+const STORAGE_KEY = 'tally_pwa_v2';
+
+const DEFAULT_SERVER_URL =
+  (typeof window !== 'undefined' && window.location && /^https?:$/i.test(window.location.protocol))
+    ? window.location.origin
+    : 'https://tally.tallymcpclient.com';
+
+const DEFAULT_BEARER = '5veGs-wTif3FDiICCqPgrP36c-uvRVD_2x4_vsk8Oyo';
+
+const TOOL_LABELS = {
+  get_active_company:          '🏢 Fetched company info',
+  get_all_ledgers:             '📋 Fetched all ledgers',
+  get_ledger:                  '🔍 Looked up ledger',
+  get_vouchers:                '🧾 Fetched vouchers',
+  get_trial_balance:           '⚖️ Fetched trial balance',
+  get_balance_sheet:           '📊 Fetched balance sheet',
+  get_profit_loss:             '📈 Fetched P&L statement',
+  get_daybook:                 '📒 Fetched day book',
+  get_outstanding_receivables: '💰 Fetched receivables',
+  get_stock_summary:           '📦 Fetched stock',
+  create_sales_voucher:        '✅ Created sales voucher',
+  create_payment_voucher:      '✅ Created payment voucher',
+  create_receipt_voucher:      '✅ Created receipt voucher',
 };
 
-// Chat history — text-only [{role, content}]
-let history = [];
+// ─────────────────────────────────────────────────────────────
+// State (persisted to localStorage)
+// ─────────────────────────────────────────────────────────────
+const state = {
+  activeTab:    'home',
+  history:      [],   // [{role, content, time, tools}]
+  pinned:       [],   // [string]
+  settings: {
+    serverUrl:    DEFAULT_SERVER_URL,
+    bearerToken:  DEFAULT_BEARER,
+    speakReplies: false,
+  },
+  companyName:  '',
+};
+
 let isLoading = false;
 
-// ── Boot ─────────────────────────────────────────────────────
+// Voice runtime state (not persisted)
+// Mic uses MediaRecorder + server-side Whisper now (works on every phone),
+// not the flaky browser SpeechRecognition that fails on installed PWAs.
+let mediaRecorder = null;
+let mediaStream   = null;
+let mediaChunks   = [];
+let micState      = 'idle';   // 'idle' | 'recording' | 'transcribing'
+
+// ─────────────────────────────────────────────────────────────
+// Persistence
+// ─────────────────────────────────────────────────────────────
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === 'object') {
+      if (Array.isArray(obj.history)) state.history = obj.history.slice(-200);
+      if (Array.isArray(obj.pinned))  state.pinned  = obj.pinned.slice(0, 24);
+      if (obj.settings && typeof obj.settings === 'object') {
+        Object.assign(state.settings, obj.settings);
+      }
+      if (typeof obj.activeTab === 'string') state.activeTab = obj.activeTab;
+      if (typeof obj.companyName === 'string') state.companyName = obj.companyName;
+    }
+  } catch (e) {
+    console.warn('Failed to load saved state:', e);
+  }
+}
+
+function saveState() {
+  try {
+    const persist = {
+      history:     state.history.slice(-200),
+      pinned:      state.pinned,
+      settings:    state.settings,
+      activeTab:   state.activeTab,
+      companyName: state.companyName,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persist));
+  } catch (e) {
+    console.warn('Failed to save state:', e);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tab switching
+// ─────────────────────────────────────────────────────────────
+function switchTab(name) {
+  state.activeTab = name;
+  document.querySelectorAll('.tab').forEach(el => {
+    el.classList.toggle('active', el.id === `tab-${name}`);
+  });
+  document.querySelectorAll('.nav-btn').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === name);
+  });
+  // Refresh dynamic content per tab
+  if (name === 'chat')     scrollChatDown();
+  if (name === 'settings') refreshSettingsTab();
+  if (name === 'einvoice') { initEinvoiceTabIfNeeded(); refreshEinvBanner(); recalcEinvTotals(); }
+  if (name === 'ledgers')  initLedgersTab();
+  saveState();
+}
+
+function goSettings() { switchTab('settings'); }
+
+// ─────────────────────────────────────────────────────────────
+// Boot
+// ─────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  if (!CFG.serverUrl) {
+  loadState();
+  if (!state.settings.serverUrl) {
     showSetup();
   } else {
-    init();
+    initApp();
   }
 });
 
-function init() {
-  addBotMessage(
-    "👋 Hi! I'm your **TallyPrime Assistant**.\n\n" +
-    "I can help you:\n" +
-    "- 📊 Query ledger balances and details\n" +
-    "- 📈 View reports (P&L, Balance Sheet, Trial Balance, Day Book)\n" +
-    "- 💰 Check outstanding receivables\n" +
-    "- 🧾 Create Sales, Payment & Receipt vouchers\n\n" +
-    "What would you like to know?"
-  );
+function initApp() {
+  setDefaultDates();
+  renderHistory();
+  renderPinnedBar();
+  loadEinv();
+  switchTab(state.activeTab || 'home');
+  initVoice();
+  refreshSettingsTab();
+  initEinvoiceTabIfNeeded();
+  // If we have a remembered company name, show it immediately; refresh in background.
+  if (state.companyName) setCompanyName(state.companyName);
   fetchCompany();
 }
 
-async function fetchCompany() {
-  try {
-    const res = await chatAPI('What is the active company name? Reply with just the company name in one line, nothing else.');
-    const name = res.response.trim().split('\n')[0].replace(/\*+/g, '').trim();
-    document.getElementById('header-sub').textContent = name || 'Connected';
-    // Remove the welcome query from history so it doesn't clutter context
-    history = [];
-  } catch {
-    document.getElementById('header-sub').textContent = 'TallyPrime';
-  }
-}
-
-// ── Setup screen ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Setup screen
+// ─────────────────────────────────────────────────────────────
 function showSetup() {
-  document.getElementById('setup-screen').classList.add('open');
-  document.getElementById('setup-url').value = CFG.serverUrl || '';
-  document.getElementById('setup-key').value = CFG.bearerToken || '';
+  const el = document.getElementById('setup-screen');
+  document.getElementById('setup-url').value = state.settings.serverUrl || DEFAULT_SERVER_URL;
+  document.getElementById('setup-key').value = state.settings.bearerToken || '';
+  el.classList.add('open');
 }
 
 function saveSetup() {
   const url = document.getElementById('setup-url').value.trim().replace(/\/$/, '');
   const key = document.getElementById('setup-key').value.trim();
   if (!url) { alert('Please enter the server URL'); return; }
-  CFG.serverUrl   = url;
-  CFG.bearerToken = key;
+  state.settings.serverUrl   = url;
+  state.settings.bearerToken = key;
+  saveState();
   document.getElementById('setup-screen').classList.remove('open');
-  init();
+  initApp();
 }
 
-// ── Settings sheet ───────────────────────────────────────────
-function openSettings() {
-  document.getElementById('cfg-url').value = CFG.serverUrl;
-  document.getElementById('cfg-key').value = CFG.bearerToken;
-  document.getElementById('settings-overlay').classList.add('open');
-}
+// ─────────────────────────────────────────────────────────────
+// Settings tab
+// ─────────────────────────────────────────────────────────────
+function refreshSettingsTab() {
+  document.getElementById('cfg-url').value = state.settings.serverUrl;
+  document.getElementById('cfg-key').value = state.settings.bearerToken;
 
-function overlayClick(e) {
-  if (e.target === document.getElementById('settings-overlay')) closeSettings();
-}
+  const sw = document.getElementById('speak-toggle');
+  sw.classList.toggle('on', !!state.settings.speakReplies);
+  sw.setAttribute('aria-checked', state.settings.speakReplies ? 'true' : 'false');
 
-function closeSettings() {
-  document.getElementById('settings-overlay').classList.remove('open');
+  // Voice input availability indicator
+  const hasMic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+              && (typeof MediaRecorder !== 'undefined');
+  document.getElementById('voice-input-status').textContent =
+    hasMic ? 'Tap the mic to start, tap again to send (Whisper-powered)'
+           : 'Microphone not available in this browser — mic button is hidden';
+
+  // Pinned list
+  renderPinnedManagementList();
+
+  // Seller defaults for e-invoice
+  refreshEinvSellerForm();
 }
 
 function saveSettings() {
   const url = document.getElementById('cfg-url').value.trim().replace(/\/$/, '');
   const key = document.getElementById('cfg-key').value.trim();
   if (!url) { alert('Server URL is required'); return; }
-  CFG.serverUrl   = url;
-  CFG.bearerToken = key;
-  closeSettings();
+  state.settings.serverUrl   = url;
+  state.settings.bearerToken = key;
+  saveState();
   showToast('Settings saved ✓');
 }
 
-function clearHistory() {
-  history = [];
+function clearChatHistory() {
+  if (!confirm('Clear all chat history? This cannot be undone.')) return;
+  state.history = [];
   document.getElementById('chat').innerHTML = '';
-  closeSettings();
-  addBotMessage('Chat cleared. How can I help you?');
+  saveState();
   showToast('Chat history cleared');
 }
 
-// ── Message sending ──────────────────────────────────────────
+function clearAllData() {
+  if (!confirm('Reset the app? This clears chat, pinned questions, and settings.')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Company info
+// ─────────────────────────────────────────────────────────────
+async function fetchCompany() {
+  try {
+    const res = await chatAPI(
+      'What is the active TallyPrime company name? Reply with just the company name on one line — no markdown, no commentary.',
+      [],
+      { ephemeral: true }
+    );
+    let name = (res.response || '').trim().split('\n')[0].replace(/[*_`#]/g, '').trim();
+    if (name.length > 80) name = name.slice(0, 80) + '…';
+    if (name) {
+      state.companyName = name;
+      saveState();
+      setCompanyName(name);
+    }
+  } catch (_) {
+    setCompanyName(state.companyName || 'TallyPrime');
+  }
+}
+
+function setCompanyName(name) {
+  document.getElementById('company-name').textContent = name;
+  document.getElementById('topbar-subtitle').textContent = name;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Quick reports
+// ─────────────────────────────────────────────────────────────
+function runReport(key) {
+  const queries = {
+    outstanding: "Show me total outstanding receivables with the top parties and aging breakdown.",
+    topdebtors:  "List the top 5 debtors by outstanding amount.",
+    pl:          "Give me a profit and loss summary for this month so far.",
+    balance:     "Show the balance sheet as of today — top groups only.",
+    daybook:     "List today's vouchers from the day book.",
+    stock:       "Show a stock summary — top items by closing value.",
+  };
+  const q = queries[key];
+  if (!q) return;
+  switchTab('chat');
+  setInputText(q);
+  sendMessage();
+}
+
+function quickAsk(text) {
+  switchTab('chat');
+  setInputText(text);
+  sendMessage();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Pinned questions
+// ─────────────────────────────────────────────────────────────
+function isPinned(text) {
+  return state.pinned.includes(text);
+}
+
+function pinText(text) {
+  if (!text || isPinned(text)) return;
+  state.pinned.unshift(text);
+  if (state.pinned.length > 24) state.pinned = state.pinned.slice(0, 24);
+  saveState();
+  renderPinnedBar();
+  showToast('Pinned 📌');
+}
+
+function unpinText(text) {
+  state.pinned = state.pinned.filter(t => t !== text);
+  saveState();
+  renderPinnedBar();
+  renderPinnedManagementList();
+}
+
+function renderPinnedBar() {
+  const bar = document.getElementById('pinned-bar');
+  bar.innerHTML = '';
+  if (!state.pinned.length) { bar.classList.add('empty'); return; }
+  bar.classList.remove('empty');
+  state.pinned.forEach(text => {
+    const chip = document.createElement('button');
+    chip.className = 'pin-chip';
+    chip.title = text;
+    const label = text.length > 36 ? text.slice(0, 33) + '…' : text;
+    chip.innerHTML =
+      `<span>📌 ${escapeHtml(label)}</span>` +
+      `<span class="pin-x" title="Unpin">×</span>`;
+    chip.querySelector('span:not(.pin-x)').onclick = () => { setInputText(text); sendMessage(); };
+    chip.querySelector('.pin-x').onclick = (e) => { e.stopPropagation(); unpinText(text); };
+    bar.appendChild(chip);
+  });
+}
+
+function renderPinnedManagementList() {
+  const wrap = document.getElementById('pinned-list');
+  if (!wrap) return;
+  if (!state.pinned.length) {
+    wrap.innerHTML = `<div class="empty"><span class="emoji">📌</span>No pinned questions yet.</div>`;
+    return;
+  }
+  wrap.innerHTML = state.pinned.map((t, i) => `
+    <div class="toggle-row">
+      <div style="flex:1;min-width:0;">
+        <div class="toggle-label" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(t)}</div>
+      </div>
+      <button class="msg-pin pinned" data-idx="${i}" title="Remove" style="font-size:18px;cursor:pointer;background:transparent;border:none;color:var(--danger);">×</button>
+    </div>
+  `).join('');
+  wrap.querySelectorAll('button[data-idx]').forEach(btn => {
+    btn.onclick = () => unpinText(state.pinned[parseInt(btn.dataset.idx, 10)]);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Chat — UI
+// ─────────────────────────────────────────────────────────────
+function setInputText(t) {
+  const input = document.getElementById('msg-input');
+  input.value = t;
+  autoResize(input);
+  input.focus();
+}
+
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
@@ -615,113 +1883,71 @@ function autoResize(el) {
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
 
-function sendChip(el) {
-  const text = el.textContent.replace(/^[\p{Emoji}\s]+/u, '').trim();
-  document.getElementById('msg-input').value = text;
-  hideSuggestions();
-  sendMessage();
-}
-
-function hideSuggestions() {
-  const s = document.getElementById('suggestions');
-  if (s) { s.style.display = 'none'; }
-}
-
-async function sendMessage() {
-  if (isLoading) return;
-  const input = document.getElementById('msg-input');
-  const text = input.value.trim();
-  if (!text) return;
-
-  hideSuggestions();
-  input.value = '';
-  input.style.height = 'auto';
-
-  addUserMessage(text);
-  setLoading(true, 'Thinking…');
-
-  try {
-    const data = await chatAPI(text, history);
-    const toolsMsg = data.tools_used && data.tools_used.length
-      ? formatToolsUsed(data.tools_used)
-      : null;
-    addBotMessage(data.response, toolsMsg);
-    history = data.history || history;
-  } catch (err) {
-    addBotMessage(`⚠️ **Error**: ${err.message}\n\nPlease check your connection and settings.`);
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function chatAPI(message, hist = []) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (CFG.bearerToken) headers['Authorization'] = `Bearer ${CFG.bearerToken}`;
-
-  const res = await fetch(`${CFG.serverUrl}/chat`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ message, history: hist }),
+function scrollChatDown() {
+  requestAnimationFrame(() => {
+    const c = document.getElementById('chat');
+    if (c) c.scrollTop = c.scrollHeight;
   });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `HTTP ${res.status}`);
-  }
-  return res.json();
 }
 
-// ── Tool name → friendly label ───────────────────────────────
-const TOOL_LABELS = {
-  get_active_company:         '🏢 Fetched company info',
-  get_all_ledgers:            '📋 Fetched all ledgers',
-  get_ledger:                 '🔍 Looked up ledger',
-  get_vouchers:               '🧾 Fetched vouchers',
-  get_trial_balance:          '⚖️ Fetched trial balance',
-  get_balance_sheet:          '📊 Fetched balance sheet',
-  get_profit_loss:            '📈 Fetched P&L statement',
-  get_daybook:                '📒 Fetched day book',
-  get_outstanding_receivables:'💰 Fetched receivables',
-  create_sales_voucher:       '✅ Created sales voucher',
-  create_payment_voucher:     '✅ Created payment voucher',
-  create_receipt_voucher:     '✅ Created receipt voucher',
-};
-
-function formatToolsUsed(tools) {
-  const unique = [...new Set(tools)];
-  return unique.map(t => TOOL_LABELS[t] || `🔧 ${t}`).join(' · ');
+function timeNow() {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// ── DOM helpers ──────────────────────────────────────────────
-function addUserMessage(text) {
+function renderHistory() {
   const chat = document.getElementById('chat');
-  const row = document.createElement('div');
+  chat.innerHTML = '';
+  state.history.forEach(m => {
+    if (m.role === 'user') addUserMessage(m.content, m.time, false);
+    else                   addBotMessage(m.content, m.tools || null, m.time, false);
+  });
+}
+
+function addUserMessage(text, time, persist = true) {
+  const chat = document.getElementById('chat');
+  const row  = document.createElement('div');
   row.className = 'msg-row user';
   row.innerHTML = `
     <div class="bubble">${escapeHtml(text)}</div>
-    <div class="msg-time">${timeNow()}</div>
+    <div class="msg-meta">${escapeHtml(time || timeNow())}</div>
   `;
   chat.appendChild(row);
-  scrollDown();
+  scrollChatDown();
+  if (persist) {
+    state.history.push({ role: 'user', content: text, time: time || timeNow() });
+    saveState();
+  }
 }
 
-function addBotMessage(text, toolsLabel) {
+function addBotMessage(text, toolsLabel, time, persist = true) {
   const chat = document.getElementById('chat');
-  const row = document.createElement('div');
+  const row  = document.createElement('div');
   row.className = 'msg-row bot';
-
-  let toolsHtml = '';
-  if (toolsLabel) {
-    toolsHtml = `<div class="tool-badge"><span class="tool-badge-icon">⚡</span>${escapeHtml(toolsLabel)}</div>`;
-  }
-
+  const toolsHtml = toolsLabel
+    ? `<div class="tool-badge"><span>⚡</span>${escapeHtml(toolsLabel)}</div>`
+    : '';
+  const pinned = isPinned(text);
   row.innerHTML = `
     <div class="bubble">${renderMarkdown(text)}</div>
     ${toolsHtml}
-    <div class="msg-time">${timeNow()}</div>
+    <div class="msg-meta">
+      <span>${escapeHtml(time || timeNow())}</span>
+      <span class="msg-pin ${pinned ? 'pinned' : ''}" title="${pinned ? 'Pinned' : 'Pin this'}">📌</span>
+    </div>
   `;
   chat.appendChild(row);
-  scrollDown();
+  // Pin handler
+  row.querySelector('.msg-pin').onclick = () => {
+    if (isPinned(text)) unpinText(text);
+    else pinText(text);
+    row.querySelector('.msg-pin').classList.toggle('pinned', isPinned(text));
+  };
+  scrollChatDown();
+  if (persist) {
+    state.history.push({ role: 'assistant', content: text, time: time || timeNow(), tools: toolsLabel || null });
+    saveState();
+  }
+  if (persist) speakText(text);
 }
 
 function setLoading(active, status) {
@@ -733,77 +1959,392 @@ function setLoading(active, status) {
     txt.textContent = status || 'Thinking…';
     typing.classList.add('visible');
     btn.disabled = true;
-    scrollDown();
+    scrollChatDown();
   } else {
     typing.classList.remove('visible');
     btn.disabled = false;
   }
 }
 
-function scrollDown() {
-  requestAnimationFrame(() => {
-    const chat = document.getElementById('chat');
-    chat.scrollTop = chat.scrollHeight;
-  });
-}
-
-function timeNow() {
-  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
 function showToast(msg) {
   const t = document.createElement('div');
+  t.className = 'toast';
   t.textContent = msg;
-  Object.assign(t.style, {
-    position: 'fixed', bottom: '90px', left: '50%', transform: 'translateX(-50%)',
-    background: '#323232', color: 'white', padding: '10px 20px', borderRadius: '24px',
-    fontSize: '14px', zIndex: '999', boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-  });
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2500);
+  setTimeout(() => t.remove(), 2400);
 }
 
-// ── Minimal markdown renderer ────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Chat — Network
+// ─────────────────────────────────────────────────────────────
+async function sendMessage() {
+  if (isLoading) return;
+  const input = document.getElementById('msg-input');
+  const text  = input.value.trim();
+  if (!text) return;
+
+  cancelSpeak();
+  input.value = '';
+  input.style.height = 'auto';
+  addUserMessage(text);
+  setLoading(true, 'Thinking…');
+  try {
+    const data = await chatAPI(text, getServerHistory());
+    const toolsMsg = (data.tools_used && data.tools_used.length)
+      ? formatToolsUsed(data.tools_used)
+      : null;
+    addBotMessage(data.response || '(empty reply)', toolsMsg);
+  } catch (err) {
+    addBotMessage(`⚠️ **Error**: ${escapeHtml(err.message)}\n\nCheck your connection and settings.`, null);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// Convert state.history (rich entries) into the text-only form the server expects.
+function getServerHistory() {
+  return state.history
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({ role: m.role, content: m.content }));
+}
+
+async function chatAPI(message, history = [], opts = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.settings.bearerToken) {
+    headers['Authorization'] = `Bearer ${state.settings.bearerToken}`;
+  }
+  const res = await fetch(`${state.settings.serverUrl}/chat`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ message, history }),
+  });
+  if (!res.ok) {
+    let err;
+    try { err = await res.json(); } catch (_) { err = { error: res.statusText }; }
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+function formatToolsUsed(tools) {
+  const unique = [...new Set(tools)];
+  return unique.map(t => TOOL_LABELS[t] || `🔧 ${t}`).join(' · ');
+}
+
+// ─────────────────────────────────────────────────────────────
+// Voucher forms
+// ─────────────────────────────────────────────────────────────
+function showVoucherForm(kind) {
+  document.querySelectorAll('.seg-tabs button').forEach(b =>
+    b.classList.toggle('active', b.dataset.vform === kind)
+  );
+  document.querySelectorAll('.voucher-form').forEach(f =>
+    f.classList.toggle('active', f.id === `vf-${kind}`)
+  );
+}
+
+function setDefaultDates() {
+  const today = new Date().toISOString().slice(0, 10);
+  ['vs-date', 'vp-date', 'vr-date'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.value) el.value = today;
+  });
+}
+
+function val(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }
+
+function submitVoucher(kind) {
+  let prompt = '';
+  if (kind === 'sales') {
+    const date  = val('vs-date'), party = val('vs-party'), salesLed = val('vs-sales-led');
+    const item  = val('vs-item'), qty = val('vs-qty'), unit = val('vs-unit'), rate = val('vs-rate');
+    const gst   = val('vs-gst'), num = val('vs-num'), narr = val('vs-narr');
+    if (!date || !party || !salesLed || !item || !qty || !rate) {
+      alert('Please fill date, party, sales ledger, item, quantity and rate.'); return;
+    }
+    prompt = [
+      `Please prepare a Sales voucher in TallyPrime with these details:`,
+      `- Date: ${date}`,
+      `- Party (customer): ${party}`,
+      `- Sales ledger: ${salesLed}`,
+      `- Stock item: ${item}, quantity ${qty}${unit ? ' ' + unit : ''}, rate ${rate}`,
+      gst ? `- GST rate: ${gst}%` : '',
+      num ? `- Voucher number: ${num}` : '',
+      narr ? `- Narration: ${narr}` : '',
+      ``,
+      `First summarise exactly what will be posted (lines, GST split, party debit total) and ask me to confirm before calling the create_sales_voucher tool. Use intrastate CGST+SGST split unless I say it is interstate.`,
+    ].filter(Boolean).join('\n');
+  }
+  else if (kind === 'payment') {
+    const date = val('vp-date'), party = val('vp-party'), bank = val('vp-bank');
+    const amt  = val('vp-amt'),  mode  = val('vp-mode'), ref = val('vp-ref'), num = val('vp-num'), narr = val('vp-narr');
+    if (!date || !party || !bank || !amt) { alert('Please fill date, party, bank/cash ledger and amount.'); return; }
+    prompt = [
+      `Please prepare a Payment voucher in TallyPrime with these details:`,
+      `- Date: ${date}`,
+      `- Pay to (party): ${party}`,
+      `- From (bank/cash ledger): ${bank}`,
+      `- Amount: ₹${amt}`,
+      mode ? `- Transfer mode: ${mode}` : '',
+      ref  ? `- Reference / instrument number: ${ref}` : '',
+      num  ? `- Voucher number: ${num}` : '',
+      narr ? `- Narration: ${narr}` : '',
+      ``,
+      `Summarise the entry (which ledger debits, which credits, amount, bill ref) and ask me to confirm before calling create_payment_voucher.`,
+    ].filter(Boolean).join('\n');
+  }
+  else if (kind === 'receipt') {
+    const date = val('vr-date'), party = val('vr-party'), bank = val('vr-bank');
+    const amt  = val('vr-amt'),  mode  = val('vr-mode'), ref = val('vr-ref'), num = val('vr-num'), narr = val('vr-narr');
+    if (!date || !party || !bank || !amt) { alert('Please fill date, party, bank/cash ledger and amount.'); return; }
+    prompt = [
+      `Please prepare a Receipt voucher in TallyPrime with these details:`,
+      `- Date: ${date}`,
+      `- Received from (party): ${party}`,
+      `- Into (bank/cash ledger): ${bank}`,
+      `- Amount: ₹${amt}`,
+      mode ? `- Transaction type: ${mode}` : '',
+      ref  ? `- Reference / instrument number: ${ref}` : '',
+      num  ? `- Voucher number: ${num}` : '',
+      narr ? `- Narration: ${narr}` : '',
+      ``,
+      `Summarise the entry and ask me to confirm before calling create_receipt_voucher.`,
+    ].filter(Boolean).join('\n');
+  }
+  else { return; }
+
+  switchTab('chat');
+  setInputText(prompt);
+  sendMessage();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Voice INPUT — MediaRecorder + server-side Whisper transcription
+// (works on every phone & desktop browser, including installed PWAs)
+// ─────────────────────────────────────────────────────────────
+function initVoice() {
+  const micBtn = document.getElementById('mic-btn');
+  if (!micBtn) return;
+
+  const hasMic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+              && (typeof MediaRecorder !== 'undefined');
+  if (!hasMic) { micBtn.classList.add('hidden'); return; }
+
+  micBtn.addEventListener('click',       toggleMic);
+  micBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+function setMicState(next) {
+  micState = next;
+  const btn = document.getElementById('mic-btn');
+  if (!btn) return;
+  btn.classList.toggle('recording',    micState === 'recording');
+  btn.classList.toggle('transcribing', micState === 'transcribing');
+  if (micState === 'recording')         btn.setAttribute('title', 'Listening… tap to stop & send');
+  else if (micState === 'transcribing') btn.setAttribute('title', 'Transcribing…');
+  else                                  btn.setAttribute('title', 'Tap to talk');
+}
+
+async function toggleMic() {
+  if (isLoading) return;
+  if (micState === 'idle')        await startRecording();
+  else if (micState === 'recording') stopRecording();
+  // ignore taps while transcribing
+}
+
+function pickAudioMimeType() {
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+  ];
+  for (const t of candidates) {
+    if (typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';
+}
+
+async function startRecording() {
+  cancelSpeak();
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    if (e && (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError')) {
+      showToast('🎤 Microphone permission denied');
+    } else {
+      showToast('🎤 ' + (e && (e.message || e.name) || 'mic error'));
+    }
+    return;
+  }
+
+  const mimeType = pickAudioMimeType();
+  try {
+    mediaRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : {});
+  } catch (e) {
+    releaseStream();
+    showToast('🎤 Recorder error: ' + (e && (e.message || e.name)));
+    return;
+  }
+  mediaChunks = [];
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) mediaChunks.push(e.data);
+  };
+  mediaRecorder.onstop = onRecorderStop;
+  mediaRecorder.onerror = (e) => {
+    showToast('🎤 ' + (e.error && e.error.message || 'recorder error'));
+    releaseStream();
+    setMicState('idle');
+  };
+  mediaRecorder.start();
+  setMicState('recording');
+}
+
+function stopRecording() {
+  try {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  } catch (_) {}
+}
+
+async function onRecorderStop() {
+  setMicState('transcribing');
+  const recordedType = (mediaRecorder && mediaRecorder.mimeType) || 'audio/webm';
+  const blob = new Blob(mediaChunks, { type: recordedType });
+  mediaChunks = [];
+  releaseStream();
+
+  if (!blob.size) {
+    showToast('🎤 No audio captured');
+    setMicState('idle');
+    return;
+  }
+
+  try {
+    const text = await transcribeAudio(blob);
+    if (!text) {
+      showToast("Couldn't catch that — try again");
+      setMicState('idle');
+      return;
+    }
+    // Send the transcript through the chat pipeline.
+    if (state.activeTab !== 'chat') switchTab('chat');
+    const input = document.getElementById('msg-input');
+    input.value = text;
+    autoResize(input);
+    setMicState('idle');
+    sendMessage();
+  } catch (e) {
+    showToast('🎤 ' + (e.message || 'transcription failed'));
+    setMicState('idle');
+  }
+}
+
+function releaseStream() {
+  if (mediaStream) {
+    try { mediaStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+    mediaStream = null;
+  }
+}
+
+async function transcribeAudio(blob) {
+  const headers = {};
+  if (state.settings.bearerToken) headers['Authorization'] = `Bearer ${state.settings.bearerToken}`;
+  if (blob.type) headers['Content-Type'] = blob.type;
+  const res = await fetch(`${state.settings.serverUrl}/transcribe`, {
+    method: 'POST',
+    headers,
+    body: blob,
+  });
+  if (!res.ok) {
+    let err = `HTTP ${res.status}`;
+    try { err = (await res.json()).error || err; } catch (_) {}
+    throw new Error(err);
+  }
+  const data = await res.json();
+  return (data.text || '').trim();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Voice OUTPUT — Text-to-speech for bot replies
+// ─────────────────────────────────────────────────────────────
+function toggleSpeakReplies() {
+  if (!('speechSynthesis' in window)) {
+    showToast('Speech synthesis not supported');
+    return;
+  }
+  state.settings.speakReplies = !state.settings.speakReplies;
+  saveState();
+  const sw = document.getElementById('speak-toggle');
+  sw.classList.toggle('on', state.settings.speakReplies);
+  sw.setAttribute('aria-checked', state.settings.speakReplies ? 'true' : 'false');
+  if (!state.settings.speakReplies) cancelSpeak();
+  showToast(state.settings.speakReplies ? '🔊 Voice replies on' : '🔇 Voice replies off');
+}
+
+function cancelSpeak() {
+  if ('speechSynthesis' in window) {
+    try { window.speechSynthesis.cancel(); } catch (_) {}
+  }
+}
+
+function speakText(text) {
+  if (!state.settings.speakReplies) return;
+  if (!('speechSynthesis' in window)) return;
+  const clean = stripMarkdownForSpeech(text);
+  if (!clean) return;
+  cancelSpeak();
+  const u = new SpeechSynthesisUtterance(clean);
+  u.lang  = 'en-US';
+  u.rate  = 1.0;
+  u.pitch = 1.0;
+  const voices = window.speechSynthesis.getVoices();
+  const pick = voices.find(v => /^en-IN/i.test(v.lang))
+            || voices.find(v => /^en-US/i.test(v.lang))
+            || voices.find(v => /^en/i.test(v.lang));
+  if (pick) u.voice = pick;
+  window.speechSynthesis.speak(u);
+}
+
+function stripMarkdownForSpeech(md) {
+  if (!md) return '';
+  return String(md)
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/!?\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^---+$/gm, '. ')
+    .replace(/^[\s•\-\*]+/gm, '')
+    .replace(/[#_~`>]/g, '')
+    .replace(/₹/g, ' rupees ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Markdown renderer (small + safe-ish)
+// ─────────────────────────────────────────────────────────────
 function renderMarkdown(md) {
   if (!md) return '';
   let html = escapeHtml(md);
-
-  // Code blocks (``` ... ```)
   html = html.replace(/```[\w]*\n?([\s\S]*?)```/g,
     (_, code) => `<pre><code>${code.trim()}</code></pre>`);
-
-  // Inline code
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-  // Bold
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
-
-  // Italic
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-  // Headers
   html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
   html = html.replace(/^### (.+)$/gm,  '<h3>$1</h3>');
-
-  // Horizontal rule
   html = html.replace(/^---+$/gm, '<hr>');
-
-  // Unordered list lines
   html = html.replace(/^[•\-\*] (.+)$/gm, '<li>$1</li>');
   html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
-
-  // Ordered list lines
   html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
-  // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
-
-  // Paragraphs — double newline
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   html = html.replace(/\n{2,}/g, '</p><p>');
-  // Single newlines
   html = html.replace(/\n/g, '<br>');
-
   return `<p>${html}</p>`;
 }
 
@@ -814,6 +2355,791 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+
+// ─────────────────────────────────────────────────────────────
+// E-Invoice — Indian state codes (NIC schema)
+// ─────────────────────────────────────────────────────────────
+const STATE_CODES = [
+  ['01','Jammu & Kashmir'], ['02','Himachal Pradesh'], ['03','Punjab'],
+  ['04','Chandigarh'],      ['05','Uttarakhand'],      ['06','Haryana'],
+  ['07','Delhi'],           ['08','Rajasthan'],        ['09','Uttar Pradesh'],
+  ['10','Bihar'],           ['11','Sikkim'],           ['12','Arunachal Pradesh'],
+  ['13','Nagaland'],        ['14','Manipur'],          ['15','Mizoram'],
+  ['16','Tripura'],         ['17','Meghalaya'],        ['18','Assam'],
+  ['19','West Bengal'],     ['20','Jharkhand'],        ['21','Odisha'],
+  ['22','Chhattisgarh'],    ['23','Madhya Pradesh'],   ['24','Gujarat'],
+  ['26','Dadra & Nagar Haveli and Daman & Diu'],
+  ['27','Maharashtra'],     ['29','Karnataka'],        ['30','Goa'],
+  ['31','Lakshadweep'],     ['32','Kerala'],           ['33','Tamil Nadu'],
+  ['34','Puducherry'],      ['35','Andaman & Nicobar Islands'],
+  ['36','Telangana'],       ['37','Andhra Pradesh'],   ['38','Ladakh'],
+  ['96','Other Country'],
+];
+
+function fillStateOptions(selectId, includeOtherCountry = false) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = STATE_CODES
+    .filter(([code]) => includeOtherCountry || code !== '96')
+    .map(([code, name]) => `<option value="${code}">${code} — ${name}</option>`)
+    .join('');
+  if (current) sel.value = current;
+}
+
+// ─────────────────────────────────────────────────────────────
+// E-Invoice — state & persistence
+// ─────────────────────────────────────────────────────────────
+const EINV_KEY = 'tally_einv_v1';
+
+const einvState = {
+  seller: {
+    gstin: '', legal_name: '', trade_name: '',
+    addr1: '', addr2: '', loc: '', pin: '', stcd: '', ph: '', em: '',
+  },
+  history: [],   // [{ts, doc_no, doc_date, buyer_gstin, irn, ack_no, ack_dt, qr_png_b64, form, status}]
+  // The current draft form (also re-loaded on tab open)
+  draft: null,
+};
+
+function loadEinv() {
+  try {
+    const raw = localStorage.getItem(EINV_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === 'object') {
+      Object.assign(einvState.seller, obj.seller || {});
+      einvState.history = Array.isArray(obj.history) ? obj.history.slice(-50) : [];
+      einvState.draft   = obj.draft || null;
+    }
+  } catch (e) { console.warn('einv load failed', e); }
+}
+
+function saveEinv() {
+  try {
+    localStorage.setItem(EINV_KEY, JSON.stringify({
+      seller:  einvState.seller,
+      history: einvState.history.slice(-50),
+      draft:   einvState.draft,
+    }));
+  } catch (e) { console.warn('einv save failed', e); }
+}
+
+// ─────────────────────────────────────────────────────────────
+// E-Invoice — Settings tab: Seller defaults
+// ─────────────────────────────────────────────────────────────
+function refreshEinvSellerForm() {
+  const s = einvState.seller;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ''; };
+  fillStateOptions('cfg-sel-stcd');
+  set('cfg-sel-gstin', s.gstin);
+  set('cfg-sel-name',  s.legal_name);
+  set('cfg-sel-trade', s.trade_name);
+  set('cfg-sel-addr1', s.addr1);
+  set('cfg-sel-addr2', s.addr2);
+  set('cfg-sel-loc',   s.loc);
+  set('cfg-sel-pin',   s.pin);
+  set('cfg-sel-stcd',  s.stcd);
+  set('cfg-sel-ph',    s.ph);
+  set('cfg-sel-em',    s.em);
+}
+
+function saveEinvSeller() {
+  const get = (id) => (document.getElementById(id) || {}).value || '';
+  einvState.seller = {
+    gstin:      get('cfg-sel-gstin').trim().toUpperCase(),
+    legal_name: get('cfg-sel-name').trim(),
+    trade_name: get('cfg-sel-trade').trim(),
+    addr1:      get('cfg-sel-addr1').trim(),
+    addr2:      get('cfg-sel-addr2').trim(),
+    loc:        get('cfg-sel-loc').trim(),
+    pin:        get('cfg-sel-pin').trim(),
+    stcd:       get('cfg-sel-stcd').trim(),
+    ph:         get('cfg-sel-ph').trim(),
+    em:         get('cfg-sel-em').trim(),
+  };
+  saveEinv();
+  showToast('Seller defaults saved ✓');
+  // Refresh the e-invoice tab in case user is about to head there.
+  refreshEinvBanner();
+}
+
+function refreshEinvBanner() {
+  const ok = einvState.seller.gstin && einvState.seller.stcd && einvState.seller.legal_name;
+  const banner = document.getElementById('einv-config-banner');
+  if (banner) banner.style.display = ok ? 'none' : 'block';
+}
+
+// ─────────────────────────────────────────────────────────────
+// E-Invoice — Form: items
+// ─────────────────────────────────────────────────────────────
+function newItemDefaults() {
+  return { desc:'', hsn:'', qty:1, unit:'NOS', rate:0, gst_rate:18, discount:0, is_service:false };
+}
+
+function addEinvItem(prefill) {
+  const wrap = document.getElementById('ei-items');
+  const idx = wrap.children.length;
+  const it = Object.assign(newItemDefaults(), prefill || {});
+  const row = document.createElement('div');
+  row.className = 'item-row';
+  row.dataset.idx = idx;
+  row.innerHTML = `
+    <span class="row-num">#${idx + 1}</span>
+    <button class="row-del" title="Remove" onclick="removeEinvItem(${idx})">×</button>
+    <div class="field desc-row"><label>Description</label><input class="ei-desc" type="text" value="${escapeHtml(it.desc)}"></div>
+    <div class="field-row">
+      <div class="field"><label>HSN/SAC</label><input class="ei-hsn" type="text" value="${escapeHtml(it.hsn)}"></div>
+      <div class="field"><label>Unit</label><input class="ei-unit" type="text" value="${escapeHtml(it.unit)}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Qty</label><input class="ei-qty" type="number" step="any" value="${it.qty}"></div>
+      <div class="field"><label>Rate (₹)</label><input class="ei-rate" type="number" step="any" value="${it.rate}"></div>
+      <div class="field"><label>GST %</label><input class="ei-gst" type="number" step="any" value="${it.gst_rate}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Discount (₹)</label><input class="ei-disc" type="number" step="any" value="${it.discount}"></div>
+      <div class="field" style="display:flex;align-items:flex-end;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text-2);text-transform:none;letter-spacing:0;">
+          <input type="checkbox" class="ei-svc" ${it.is_service ? 'checked' : ''}> Service item
+        </label>
+      </div>
+    </div>
+  `;
+  wrap.appendChild(row);
+  // Wire up live total recalc
+  row.querySelectorAll('input').forEach(inp => inp.addEventListener('input', recalcEinvTotals));
+  recalcEinvTotals();
+}
+
+function removeEinvItem(idx) {
+  const wrap = document.getElementById('ei-items');
+  const row  = wrap.querySelector(`[data-idx="${idx}"]`);
+  if (row) row.remove();
+  // Reindex remaining rows
+  Array.from(wrap.children).forEach((r, i) => {
+    r.dataset.idx = i;
+    const n = r.querySelector('.row-num'); if (n) n.textContent = `#${i+1}`;
+    const b = r.querySelector('.row-del'); if (b) b.setAttribute('onclick', `removeEinvItem(${i})`);
+  });
+  recalcEinvTotals();
+}
+
+function readEinvItems() {
+  const rows = document.querySelectorAll('#ei-items .item-row');
+  const items = [];
+  rows.forEach(r => {
+    const num = (cls) => parseFloat((r.querySelector(cls)||{}).value || 0) || 0;
+    const txt = (cls) => ((r.querySelector(cls)||{}).value || '').trim();
+    items.push({
+      desc:       txt('.ei-desc'),
+      hsn:        txt('.ei-hsn'),
+      unit:       txt('.ei-unit') || 'NOS',
+      qty:        num('.ei-qty'),
+      rate:       num('.ei-rate'),
+      gst_rate:   num('.ei-gst'),
+      discount:   num('.ei-disc'),
+      is_service: !!(r.querySelector('.ei-svc') || {}).checked,
+    });
+  });
+  return items;
+}
+
+function recalcEinvTotals() {
+  const items = readEinvItems();
+  const sellerSt = einvState.seller.stcd;
+  const buyerPos = (document.getElementById('ei-buyer-pos') || {}).value || '';
+  const intrastate = sellerSt && sellerSt === buyerPos;
+
+  let totAss = 0, totGst = 0;
+  for (const it of items) {
+    const ass = Math.max(0, it.qty * it.rate - it.discount);
+    const gst = ass * (it.gst_rate / 100);
+    totAss += ass;
+    totGst += gst;
+  }
+  const grand = totAss + totGst;
+  const round = (n) => Math.round(n * 100) / 100;
+  document.getElementById('ei-total-val').textContent       = '₹' + round(grand).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  document.getElementById('ei-total-breakdown').textContent =
+    `Taxable ₹${round(totAss).toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2})} + ` +
+    `GST ₹${round(totGst).toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  document.getElementById('ei-tax-mode').textContent = intrastate ? 'INTRASTATE (CGST+SGST)' : 'INTERSTATE (IGST)';
+}
+
+// ─────────────────────────────────────────────────────────────
+// E-Invoice — Form: init / read / submit
+// ─────────────────────────────────────────────────────────────
+function initEinvoiceTabIfNeeded() {
+  const itemsWrap = document.getElementById('ei-items');
+  if (!itemsWrap) return;
+  fillStateOptions('ei-buyer-stcd');
+  fillStateOptions('ei-buyer-pos', true);
+
+  // Default the doc date to today (only on first init, not every tab visit).
+  const dateEl = document.getElementById('ei-doc-date');
+  if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+
+  // Make POS auto-follow buyer state by default — but allow override.
+  const stEl  = document.getElementById('ei-buyer-stcd');
+  const posEl = document.getElementById('ei-buyer-pos');
+  if (stEl && posEl) {
+    stEl.addEventListener('change', () => {
+      // Only auto-sync if POS hasn't been manually set yet
+      if (!posEl.dataset.manual) posEl.value = stEl.value;
+      recalcEinvTotals();
+    });
+    posEl.addEventListener('change', () => {
+      posEl.dataset.manual = '1';
+      recalcEinvTotals();
+    });
+  }
+
+  // Initialise with one empty item if currently empty
+  if (itemsWrap.children.length === 0) addEinvItem();
+
+  refreshEinvBanner();
+  renderEinvHistory();
+}
+
+function readEinvForm() {
+  const get = (id) => ((document.getElementById(id) || {}).value || '').trim();
+  const docDateRaw = get('ei-doc-date');     // YYYY-MM-DD
+  // NIC IRP wants DD/MM/YYYY
+  let docDate = '';
+  if (docDateRaw) {
+    const [y, m, d] = docDateRaw.split('-');
+    docDate = `${d}/${m}/${y}`;
+  }
+  const items = readEinvItems();
+
+  // ── E-Way Bill block — only included when at least one transport field is filled ──
+  const ewbDocNoRaw = get('ei-ewb-doc-no');
+  const ewbDocDtRaw = get('ei-ewb-doc-dt');     // YYYY-MM-DD from <input type="date">
+  const ewbVehNoRaw = get('ei-ewb-veh-no');
+  let ewbDocDt = '';
+  if (ewbDocDtRaw) {
+    const [y, m, d] = ewbDocDtRaw.split('-');
+    ewbDocDt = `${d}/${m}/${y}`;                // NIC IRP wants DD/MM/YYYY
+  }
+  const ewb = (ewbDocNoRaw || ewbDocDtRaw || ewbVehNoRaw) ? {
+    trans_id:     '',                            // optional, sent as null by server
+    trans_name:   '',                            // optional, sent as null by server
+    distance:     0,                             // 0 = let IRP auto-calculate
+    trans_doc_no: ewbDocNoRaw,
+    trans_doc_dt: ewbDocDt,
+    veh_no:       ewbVehNoRaw.toUpperCase(),
+  } : null;
+
+  return {
+    doc_type:    get('ei-doc-type') || 'INV',
+    doc_no:      get('ei-doc-no'),
+    doc_date:    docDate,
+    supply_type: get('ei-supply-type') || 'B2B',
+    seller: { ...einvState.seller },
+    buyer: {
+      gstin:      get('ei-buyer-gstin').toUpperCase(),
+      legal_name: get('ei-buyer-name'),
+      trade_name: '',
+      addr1:      get('ei-buyer-addr1'),
+      addr2:      get('ei-buyer-addr2'),
+      loc:        get('ei-buyer-loc'),
+      pin:        get('ei-buyer-pin'),
+      stcd:       get('ei-buyer-stcd'),
+      pos:        get('ei-buyer-pos') || get('ei-buyer-stcd'),
+      ph:         '',
+      em:         '',
+    },
+    items,
+    ewb,
+  };
+}
+
+function validateEinvForm(f) {
+  const errs = [];
+  if (!f.seller.gstin)    errs.push('Seller GSTIN missing — set in Settings → Seller (e-Invoice)');
+  if (!f.doc_no)          errs.push('Document number is required');
+  if (!f.doc_date)        errs.push('Document date is required');
+  if (!f.buyer.gstin || f.buyer.gstin.length !== 15) errs.push('Buyer GSTIN must be 15 characters');
+  if (!f.buyer.legal_name) errs.push('Buyer legal name is required');
+  if (!f.buyer.stcd)      errs.push('Buyer state code is required');
+  if (!f.items.length)    errs.push('At least one line item is required');
+  f.items.forEach((it, i) => {
+    if (!it.desc) errs.push(`Item #${i+1}: description is required`);
+    if (!it.hsn)  errs.push(`Item #${i+1}: HSN/SAC is required`);
+    if (it.qty <= 0)  errs.push(`Item #${i+1}: quantity must be > 0`);
+    if (it.rate < 0)  errs.push(`Item #${i+1}: rate cannot be negative`);
+  });
+  return errs;
+}
+
+async function submitEinvoice() {
+  const form = readEinvForm();
+  const errs = validateEinvForm(form);
+  if (errs.length) {
+    showEinvResult({ ok: false, error: errs.join(' · ') });
+    return;
+  }
+
+  const btn = document.getElementById('ei-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Generating IRN…';
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (state.settings.bearerToken) headers['Authorization'] = `Bearer ${state.settings.bearerToken}`;
+    const res = await fetch(`${state.settings.serverUrl}/einvoice/generate`, {
+      method: 'POST', headers, body: JSON.stringify(form),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      showEinvResult({ ok: false, error: data.error || `HTTP ${res.status}`, body: data.body, raw: data });
+      return;
+    }
+    // Success
+    showEinvResult({ ok: true, ...data, _form: form });
+    // Save history
+    einvState.history.unshift({
+      ts: Date.now(),
+      doc_no: form.doc_no,
+      doc_date: form.doc_date,
+      buyer_gstin: form.buyer.gstin,
+      buyer_name: form.buyer.legal_name,
+      irn: data.irn,
+      ack_no: data.ack_no,
+      ack_dt: data.ack_dt,
+      qr_png_b64: data.qr_png_b64 || '',
+      signed_qr: data.signed_qr || '',
+      ewb_no: data.ewb_no || '',
+      ewb_dt: data.ewb_dt || '',
+      ewb_valid_till: data.ewb_valid_till || '',
+      form,
+      status: 'ok',
+    });
+    if (einvState.history.length > 50) einvState.history.length = 50;
+    saveEinv();
+    renderEinvHistory();
+  } catch (e) {
+    showEinvResult({ ok: false, error: e.message || 'Network error' });
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate IRN';
+  }
+}
+
+function showEinvResult(r) {
+  const box = document.getElementById('ei-result');
+  if (!box) return;
+  if (!r.ok) {
+    box.className = 'irn-result error show';
+    box.innerHTML = `
+      <h3>❌ Could not generate IRN</h3>
+      <div class="meta">${escapeHtml(r.error || 'Unknown error')}</div>
+      ${r.body ? `<pre style="margin-top:8px;font-size:11px;background:white;padding:8px;border-radius:6px;border:1px solid var(--border);overflow:auto;">${escapeHtml(typeof r.body === 'string' ? r.body : JSON.stringify(r.body, null, 2))}</pre>` : ''}
+    `;
+  } else {
+    box.className = 'irn-result show';
+    const qrImg = r.qr_png_b64
+      ? `<img src="data:image/png;base64,${r.qr_png_b64}" alt="IRN QR">`
+      : `<div style="width:130px;height:130px;border:2px dashed #999;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#999;font-size:11px;text-align:center;">QR<br>unavailable</div>`;
+    const ewbBlock = r.ewb_no ? `
+      <div class="meta" style="margin-top:6px;color:#0a8a3b;font-weight:600;">
+        🚚 e-Way Bill #${escapeHtml(String(r.ewb_no))}
+        ${r.ewb_dt ? ` · ${escapeHtml(String(r.ewb_dt))}` : ''}
+        ${r.ewb_valid_till ? ` · valid till ${escapeHtml(String(r.ewb_valid_till))}` : ''}
+      </div>` : '';
+    // Build the post/print payload once — both buttons get IRN + EWB data.
+    // Vehicle number is read from the form's ewb block (the user typed it
+    // before generating the IRN) so Tally's <VEHICLENUMBER> matches.
+    const tallyPayload = {
+      form:      r._form,
+      irn:       r.irn,
+      ack_no:    r.ack_no,
+      ack_dt:    r.ack_dt,
+      signed_qr: r.signed_qr     || "",
+      ewb_no:    r.ewb_no        || "",
+      ewb_dt:    r.ewb_dt        || "",
+      ewb_veh_no: (r._form && r._form.ewb && r._form.ewb.veh_no) || "",
+    };
+    const tallyPayloadStr = JSON.stringify(tallyPayload).replace(/'/g, "&#39;");
+    box.innerHTML = `
+      <h3>✅ IRN generated</h3>
+      <div class="meta">Ack #${escapeHtml(r.ack_no || '—')} · ${escapeHtml(r.ack_dt || '—')}</div>
+      <div class="irn-code">${escapeHtml(r.irn || '')}</div>
+      ${ewbBlock}
+      <div class="qr-and-actions">
+        ${qrImg}
+        <div class="actions">
+          <button class="primary" onclick='postEinvoiceToTally(${tallyPayloadStr})'>📤 Post to TallyPrime</button>
+          <button onclick='printEinvoice(${tallyPayloadStr})'>🖨 Print / Save PDF</button>
+          <button onclick='copyToClipboard(${JSON.stringify(r.irn || "")})'>📋 Copy IRN</button>
+          <button onclick='clearEinvoiceForm()'>＋ New Invoice</button>
+        </div>
+      </div>
+    `;
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function clearEinvoiceForm() {
+  document.getElementById('ei-doc-no').value = '';
+  document.getElementById('ei-buyer-gstin').value = '';
+  document.getElementById('ei-buyer-name').value = '';
+  document.getElementById('ei-buyer-addr1').value = '';
+  document.getElementById('ei-buyer-addr2').value = '';
+  document.getElementById('ei-buyer-loc').value = '';
+  document.getElementById('ei-buyer-pin').value = '';
+  // Transport / e-Way Bill fields
+  const ewbDocNo = document.getElementById('ei-ewb-doc-no');
+  const ewbDocDt = document.getElementById('ei-ewb-doc-dt');
+  const ewbVehNo = document.getElementById('ei-ewb-veh-no');
+  if (ewbDocNo) ewbDocNo.value = '';
+  if (ewbDocDt) ewbDocDt.value = '';
+  if (ewbVehNo) ewbVehNo.value = '';
+  document.getElementById('ei-items').innerHTML = '';
+  addEinvItem();
+  document.getElementById('ei-result').classList.remove('show');
+  recalcEinvTotals();
+  showToast('Form cleared');
+}
+
+// Direct PWA → MCP → TallyPrime flow. No LLM in the loop.
+// Calls /voucher/sales/from-einvoice which deterministically maps the
+// e-invoice form into a create_sales_voucher call against the Tally Gateway.
+async function postEinvoiceToTally(payload) {
+  // Find the button that was clicked, to show loading state.
+  const btn = document.querySelector('.irn-result .actions button.primary');
+  const origLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Posting…'; }
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (state.settings.bearerToken) headers['Authorization'] = `Bearer ${state.settings.bearerToken}`;
+    const res = await fetch(`${state.settings.serverUrl}/voucher/sales/from-einvoice`, {
+      method:  'POST',
+      headers,
+      body:    JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.ok) {
+      const msg = (data && (data.error || data.message)) || `HTTP ${res.status}`;
+      showToast('❌ Tally post failed: ' + msg);
+      // Append error detail to the result panel so user can see it.
+      const box = document.getElementById('ei-result');
+      if (box) {
+        const note = document.createElement('div');
+        note.style.cssText = 'margin-top:10px;padding:8px 10px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;font-size:12px;color:#991B1B;';
+        note.innerHTML = `<strong>TallyPrime rejected the post:</strong><br>${escapeHtml(msg)}<br>` +
+          `<span style="font-size:11px;color:var(--text-muted);">Common causes: party ledger "${escapeHtml((payload.form && payload.form.buyer && payload.form.buyer.legal_name) || '')}" doesn't exist in Tally, or sales/tax ledger names don't match. Check the active company and create missing ledgers via Chat.</span>`;
+        box.appendChild(note);
+      }
+      return;
+    }
+
+    // Success
+    showToast('✅ Posted to TallyPrime');
+    const box = document.getElementById('ei-result');
+    if (box) {
+      const note = document.createElement('div');
+      note.style.cssText = 'margin-top:10px;padding:8px 10px;background:#ECFDF5;border:1px solid #86EFAC;border-radius:8px;font-size:12px;color:#065F46;';
+      const taxMode = data.intrastate ? 'CGST + SGST' : 'IGST';
+      note.innerHTML = `✅ <strong>Sales voucher posted to TallyPrime</strong> · ${escapeHtml(taxMode)}` +
+        (data.voucher_number ? ` · Voucher #${escapeHtml(String(data.voucher_number))}` : '');
+      box.appendChild(note);
+    }
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Network error'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origLabel; }
+  }
+}
+
+async function printEinvoice(payload) {
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (state.settings.bearerToken) headers['Authorization'] = `Bearer ${state.settings.bearerToken}`;
+    const res = await fetch(`${state.settings.serverUrl}/einvoice/pdf`, {
+      method: 'POST', headers, body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let err = `HTTP ${res.status}`;
+      try { err = (await res.json()).error || err; } catch (_) {}
+      showToast('PDF: ' + err);
+      return;
+    }
+    const html = await res.text();
+    const w = window.open('', '_blank');
+    if (!w) {
+      showToast('Pop-up blocked — allow pop-ups to print');
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  } catch (e) {
+    showToast('Print error: ' + (e.message || e));
+  }
+}
+
+function copyToClipboard(text) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => showToast('Copied ✓')).catch(() => showToast('Copy failed'));
+  } else {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); showToast('Copied ✓'); }
+    catch (_) { showToast('Copy failed'); }
+    finally { ta.remove(); }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// E-Invoice — History
+// ─────────────────────────────────────────────────────────────
+function renderEinvHistory() {
+  const card = document.getElementById('ei-history-card');
+  const list = document.getElementById('ei-history-list');
+  if (!card || !list) return;
+  if (!einvState.history.length) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  list.innerHTML = einvState.history.slice(0, 20).map((h, i) => `
+    <div class="irn-history-item" onclick="reopenEinvHistory(${i})">
+      <span class="badge ${h.status === 'cancelled' ? 'cancel' : 'ok'}">${h.status === 'cancelled' ? 'Cancelled' : 'Live'}</span>
+      <div class="info">
+        <div class="top">${escapeHtml(h.doc_no || '—')} · ${escapeHtml(h.buyer_name || h.buyer_gstin || '')}</div>
+        <div class="sub">${escapeHtml(h.irn || '—')}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function reopenEinvHistory(i) {
+  const h = einvState.history[i];
+  if (!h) return;
+  showEinvResult({
+    ok: true,
+    irn: h.irn, ack_no: h.ack_no, ack_dt: h.ack_dt,
+    qr_png_b64: h.qr_png_b64, signed_qr: h.signed_qr,
+    _form: h.form,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Ledgers — Create master directly in TallyPrime
+// (PWA → MCP /ledger/create → TallyPrime; no LLM in the loop)
+// ─────────────────────────────────────────────────────────────
+
+// Default parent group per ledger type (also visible to user as a hint)
+const LG_DEFAULT_PARENTS = {
+  party:    'Sundry Debtors',
+  sales:    'Sales Accounts',
+  purchase: 'Purchase Accounts',
+  duty:     'Duties & Taxes',
+};
+
+// Populate the Party state dropdown using state NAMES as the value (Tally
+// stores the human name, e.g. "Karnataka", not the GSTIN code).
+function fillStateNameOptions(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const current = sel.value;
+  // STATE_CODES is defined earlier in this file as [[code, name], ...].
+  sel.innerHTML = '<option value="">-- Select state --</option>' +
+    STATE_CODES
+      .filter(([code]) => code !== '96')          // skip "Other Country"
+      .map(([_, name]) => `<option value="${name}">${name}</option>`)
+      .join('');
+  if (current) sel.value = current;
+}
+
+function renderLedgerFields() {
+  const t = (document.getElementById('lg-type') || {}).value || 'party';
+  ['party','sales','purchase','duty'].forEach(k => {
+    const el = document.getElementById(`lg-fields-${k}`);
+    if (el) el.style.display = (k === t) ? 'block' : 'none';
+  });
+  // Auto-suggest the parent group for whichever type was selected.
+  const parentEl = document.getElementById('lg-parent');
+  if (parentEl) parentEl.placeholder = `default: ${LG_DEFAULT_PARENTS[t]}`;
+}
+
+function onDutyHeadChange() {
+  // Cess: prefill rate to 12 (most common); CGST/SGST/IGST: clear to 0.
+  const head = (document.getElementById('lg-duty-head') || {}).value || '';
+  const rateEl = document.getElementById('lg-duty-rate');
+  if (!rateEl) return;
+  if (head === 'Cess' && (!rateEl.value || rateEl.value === '0')) rateEl.value = '12';
+  if (head !== 'Cess' && rateEl.value === '12') rateEl.value = '0';
+}
+
+// Convert a YYYY-MM-DD <input type="date"> value to Tally's DD-MM-YYYY format.
+function ledgerDateForTally(rawDate) {
+  if (!rawDate) return '';
+  const [y, m, d] = rawDate.split('-');
+  return `${d}-${m}-${y}`;
+}
+
+function readLedgerForm() {
+  const get = (id) => ((document.getElementById(id) || {}).value || '').trim();
+  const checked = (id) => !!(document.getElementById(id) || {}).checked;
+  const t = get('lg-type') || 'party';
+
+  const common = {
+    ledger_type: t,
+    name:        get('lg-name'),
+    parent:      get('lg-parent') || LG_DEFAULT_PARENTS[t],
+  };
+
+  if (t === 'party') {
+    return {
+      ...common,
+      opening_balance:        parseFloat(get('lg-opening') || '0') || 0,
+      gstin:                  get('lg-gstin').toUpperCase(),
+      gst_registration_type:  get('lg-gst-reg') || 'Regular',
+      address:                get('lg-address'),
+      state:                  get('lg-state'),
+      pincode:                get('lg-pincode'),
+      phone:                  get('lg-phone'),
+      email:                  get('lg-email'),
+      credit_period:          get('lg-credit-period'),
+      credit_limit:           parseFloat(get('lg-credit-limit') || '0') || 0,
+    };
+  }
+  if (t === 'sales') {
+    return {
+      ...common,
+      effective_date:    ledgerDateForTally(get('lg-effective-date')),
+      gst_type_of_supply: get('lg-supply-type') || 'Goods',
+      taxability:        get('lg-taxability') || 'Taxable',
+      hsn_sac_code:      get('lg-hsn'),
+      hsn_description:   get('lg-hsn-desc'),
+      gst_rate:          parseFloat(get('lg-gst-rate') || '0') || 0,
+      is_reverse_charge: checked('lg-rev-charge'),
+    };
+  }
+  if (t === 'purchase') {
+    return {
+      ...common,
+      effective_date:    ledgerDateForTally(get('lg-p-effective-date')),
+      gst_type_of_supply: get('lg-p-supply-type') || 'Goods',
+      taxability:        get('lg-p-taxability') || 'Taxable',
+      hsn_sac_code:      get('lg-p-hsn'),
+      hsn_description:   get('lg-p-hsn-desc'),
+      gst_rate:          parseFloat(get('lg-p-gst-rate') || '0') || 0,
+      is_reverse_charge: checked('lg-p-rev-charge'),
+      is_ineligible_itc: checked('lg-p-ineligible-itc'),
+    };
+  }
+  if (t === 'duty') {
+    return {
+      ...common,
+      duty_head:    get('lg-duty-head') || 'CGST',
+      rate_of_tax:  parseFloat(get('lg-duty-rate') || '0') || 0,
+    };
+  }
+  return common;
+}
+
+function validateLedgerForm(p) {
+  const errs = [];
+  if (!p.name) errs.push('Ledger name is required');
+  if (p.ledger_type === 'sales' && !p.effective_date)    errs.push('Effective date is required for Sales ledger');
+  if (p.ledger_type === 'purchase' && !p.effective_date) errs.push('Effective date is required for Purchase ledger');
+  if (p.ledger_type === 'party' && p.gstin && p.gstin.length !== 15) errs.push('GSTIN must be exactly 15 characters');
+  if (p.ledger_type === 'duty' && !p.duty_head) errs.push('Duty head is required');
+  return errs;
+}
+
+async function submitLedger() {
+  const payload = readLedgerForm();
+  const errs = validateLedgerForm(payload);
+  const box = document.getElementById('lg-result');
+  if (errs.length) {
+    box.className = 'irn-result error show';
+    box.innerHTML = `<h3>❌ Cannot submit</h3><ul>${errs.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>`;
+    return;
+  }
+
+  const btn = document.getElementById('lg-submit-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Creating…';
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (state.settings.bearerToken) headers['Authorization'] = `Bearer ${state.settings.bearerToken}`;
+    const res = await fetch(`${state.settings.serverUrl}/ledger/create`, {
+      method: 'POST', headers, body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || data.ok === false) {
+      const msg = data.error || (data.errors && data.errors.join('; ')) || `HTTP ${res.status}`;
+      box.className = 'irn-result error show';
+      box.innerHTML = `
+        <h3>❌ Could not create ledger</h3>
+        <div class="meta">${escapeHtml(msg)}</div>
+        ${data.raw_status ? `<div class="meta">Tally said: ${escapeHtml(data.raw_status)}</div>` : ''}
+      `;
+      return;
+    }
+    // Success path
+    const created = data.created || '0';
+    const altered = data.altered || '0';
+    const action = (created !== '0') ? 'created' : (altered !== '0' ? 'altered' : 'no change');
+    box.className = 'irn-result show';
+    box.innerHTML = `
+      <h3>✅ Ledger ${escapeHtml(action)}</h3>
+      <div class="meta">${escapeHtml(payload.name)} <span style="color:#666;">(${escapeHtml(payload.ledger_type)})</span></div>
+      <div class="meta">created: ${escapeHtml(String(created))} · altered: ${escapeHtml(String(altered))}</div>
+      <div class="qr-and-actions" style="margin-top:8px;">
+        <div class="actions">
+          <button onclick='clearLedgerForm()'>＋ Create another</button>
+          <button onclick='copyToClipboard(${JSON.stringify(payload.name)})'>📋 Copy name</button>
+        </div>
+      </div>
+    `;
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    box.className = 'irn-result error show';
+    box.innerHTML = `<h3>❌ Network error</h3><div class="meta">${escapeHtml(e.message || String(e))}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Create Ledger';
+  }
+}
+
+function clearLedgerForm() {
+  ['lg-name','lg-parent','lg-opening','lg-gstin','lg-address','lg-state',
+   'lg-pincode','lg-phone','lg-email','lg-credit-period','lg-credit-limit',
+   'lg-effective-date','lg-hsn','lg-hsn-desc',
+   'lg-p-effective-date','lg-p-hsn','lg-p-hsn-desc',
+   'lg-duty-rate'
+  ].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  ['lg-rev-charge','lg-p-rev-charge','lg-p-ineligible-itc'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.checked = false;
+  });
+  // Re-default the dropdowns
+  const setSel = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  setSel('lg-gst-reg',     'Regular');
+  setSel('lg-gst-rate',    '18');
+  setSel('lg-supply-type', 'Goods');
+  setSel('lg-taxability',  'Taxable');
+  setSel('lg-p-gst-rate',  '18');
+  setSel('lg-p-supply-type','Goods');
+  setSel('lg-p-taxability','Taxable');
+  setSel('lg-duty-head',   'CGST');
+  document.getElementById('lg-result').classList.remove('show');
+  showToast('Form cleared');
+}
+
+// One-time setup on first render of the Ledgers tab
+function initLedgersTab() {
+  fillStateNameOptions('lg-state');
+  renderLedgerFields();
+}
+
 </script>
 </body>
 </html>

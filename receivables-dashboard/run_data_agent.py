@@ -16,7 +16,7 @@ if SRC_DIR not in sys.path:
 
 import tallyprime_mcp.tally_client as tc
 
-TALLY_URL    = "http://tally.tallymcpclient.com"
+TALLY_URL    = os.environ.get("TALLY_URL", "http://localhost:9000")
 OUTPUT_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 AS_OF_DATE   = "05-04-2026"   # today (22-03-2026) + 14 days
 LEDGER_GROUP = "Sundry Debtors"

@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 import tallyprime_mcp.tally_client as tc
 
-TALLY_URL          = "http://tally.tallymcpclient.com"
+TALLY_URL          = os.environ.get("TALLY_URL", "http://localhost:9000")
 OUTPUT_DIR         = os.path.dirname(os.path.abspath(__file__))
 RECEIVABLES_PATH   = os.path.join(OUTPUT_DIR, "receivables.json")
 PARTY_DETAILS_PATH = os.path.join(OUTPUT_DIR, "party_details.json")

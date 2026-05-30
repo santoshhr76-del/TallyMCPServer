@@ -25,6 +25,22 @@ import os
 from pathlib import Path
 from typing import Any
 
+import httpx
+
+# Load .env from the repo root (or any parent directory) before reading
+# os.environ values below. python-dotenv is optional; the server still runs
+# if it's missing, just without auto-loading .env.
+try:
+    from dotenv import load_dotenv
+    # Look for .env starting from this file's directory and walking up.
+    _dotenv_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    if _dotenv_path.exists():
+        load_dotenv(_dotenv_path)
+    else:
+        load_dotenv()  # default search
+except ImportError:
+    pass
+
 import uvicorn
 from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
@@ -70,7 +86,7 @@ class ApiKeyMiddleware:
         path = scope.get("path", "")
 
         # Public paths — no auth required
-        if path in ("/health", "/", "/app"):
+        if path in ("/health", "/", "/app", "/install", "/install-qr.png", "/install-qr.svg"):
             await self.app(scope, receive, send)
             return
 
@@ -138,7 +154,7 @@ TALLY_TOOLS = [
     },
     {
         "name": "get_ledger",
-        "description": "Get full details of a specific ledger: GSTIN, PAN, phone, address, credit terms, bill-wise settings, opening/closing balance.",
+        "description": "Get full details of a specific ledger: GSTIN, PAN, contact person name, phone, email, address, credit terms, bill-wise settings, opening/closing balance.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -509,7 +525,7 @@ def execute_tally_tool(name: str, args: dict[str, Any]) -> Any:
 
     try:
         if name == "get_active_company":
-            return tc.fetch_company_info(tally_url=tally_url)
+            return tc.get_active_company(tally_url=tally_url)
 
         elif name == "get_all_ledgers":
             return tc.fetch_all_ledgers(tally_url=tally_url)
@@ -829,15 +845,810 @@ async def handle_app(request: Request):
     return HTMLResponse(pwa_path.read_text(encoding="utf-8"))
 
 
+async def handle_install(request: Request):
+    """Serve the install / scan-to-add-to-home-screen page."""
+    pwa_dir = Path(__file__).parent.parent.parent / "pwa"
+    page = pwa_dir / "install.html"
+    if not page.exists():
+        return JSONResponse({"error": "install.html not found in pwa/."}, status_code=404)
+    return HTMLResponse(page.read_text(encoding="utf-8"))
+
+
+async def handle_install_qr_png(request: Request):
+    """Serve the QR PNG file directly (for sharing / printing)."""
+    img = Path(__file__).parent.parent.parent / "pwa" / "install-qr.png"
+    if not img.exists():
+        return JSONResponse({"error": "install-qr.png not found"}, status_code=404)
+    return Response(img.read_bytes(), media_type="image/png")
+
+
+async def handle_install_qr_svg(request: Request):
+    """Serve the QR SVG file directly."""
+    img = Path(__file__).parent.parent.parent / "pwa" / "install-qr.svg"
+    if not img.exists():
+        return JSONResponse({"error": "install-qr.svg not found"}, status_code=404)
+    return Response(img.read_bytes(), media_type="image/svg+xml")
+
+
+# ─────────────────────────────────────────────────────────────────
+# Speech-to-text via OpenAI Whisper
+# ─────────────────────────────────────────────────────────────────
+
+async def handle_transcribe(request: Request):
+    """Forward raw audio bytes from the PWA to OpenAI Whisper.
+
+    Body  : raw audio (Content-Type identifies the codec, e.g. audio/webm)
+    Header: Authorization: Bearer <MCP_API_KEY>   (the same as /chat)
+    Reply : { "text": "<transcript>" }  on success
+            { "error": "..." }          on failure (4xx / 5xx)
+
+    This indirection means the OpenAI key never leaves the server, and the
+    PWA works identically on every browser / phone / installed PWA — no
+    reliance on flaky browser-side SpeechRecognition.
+    """
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    if not openai_key:
+        return JSONResponse({"error": "OPENAI_API_KEY not set on server"}, status_code=500)
+
+    audio_bytes = await request.body()
+    if not audio_bytes:
+        return JSONResponse({"error": "Empty audio payload"}, status_code=400)
+    if len(audio_bytes) > 25 * 1024 * 1024:
+        return JSONResponse({"error": "Audio too large (max 25 MB)"}, status_code=413)
+
+    content_type = request.headers.get("content-type", "audio/webm")
+    # Pick a sensible filename extension from the content type.
+    if "ogg" in content_type:
+        filename = "voice.ogg"
+    elif "mp4" in content_type or "m4a" in content_type:
+        filename = "voice.m4a"
+    elif "wav" in content_type:
+        filename = "voice.wav"
+    elif "mpeg" in content_type or "mp3" in content_type:
+        filename = "voice.mp3"
+    else:
+        filename = "voice.webm"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {openai_key}"},
+                files={"file": (filename, audio_bytes, content_type)},
+                data={
+                    "model": "whisper-1",
+                    "language": request.query_params.get("lang", "en"),
+                    "response_format": "json",
+                },
+            )
+    except httpx.RequestError as e:
+        logger.error("Whisper request failed: %s", e)
+        return JSONResponse({"error": f"Whisper request failed: {e}"}, status_code=502)
+
+    if r.status_code != 200:
+        logger.warning("Whisper non-200: %s %s", r.status_code, r.text[:200])
+        return JSONResponse(
+            {"error": f"Whisper {r.status_code}: {r.text[:300]}"},
+            status_code=502,
+        )
+
+    text = (r.json().get("text") or "").strip()
+    return JSONResponse({"text": text})
+
+
+# ─────────────────────────────────────────────────────────────────
+# E-Invoicing — Clear (formerly ClearTax) GSP integration
+# ─────────────────────────────────────────────────────────────────
+
+from .einvoice_client import (
+    get_client as get_einv_client,
+    build_irn_payload,
+    EInvoiceError,
+    EInvoiceConfigError,
+    EInvoiceAuthError,
+)
+
+
+async def handle_einvoice_generate(request: Request):
+    """Generate an IRN. Body is either:
+      * the friendly flat form dict (see einvoice_client.build_irn_payload), or
+      * a NIC IRP schema-1.1 payload directly (detected by presence of
+        'Version' + 'DocDtls' top-level keys).
+    Also accepts a single-element array of either form.
+    """
+    try:
+        form = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    # If the user passed an array, take the first element.
+    if isinstance(form, list) and form:
+        form = form[0]
+
+    # If the body is already in NIC IRP schema-1.1 format, send as-is.
+    # Otherwise build from the flat form.
+    if isinstance(form, dict) and "Version" in form and "DocDtls" in form:
+        payload = form
+    else:
+        try:
+            payload = build_irn_payload(form)
+        except Exception as e:
+            return JSONResponse({"error": f"Could not build IRN payload: {e}"}, status_code=400)
+
+    client = get_einv_client()
+    try:
+        response = await client.generate_irn(payload)
+    except EInvoiceConfigError as e:
+        return JSONResponse(e.to_dict(), status_code=500)
+    except EInvoiceAuthError as e:
+        return JSONResponse(e.to_dict(), status_code=502)
+    except EInvoiceError as e:
+        return JSONResponse(e.to_dict(), status_code=502)
+
+    # NIC IRP client returns {"data": <decoded payload>, "raw": <full envelope>}.
+    # The payload itself can be flat or nested under another "Data"/"data" key.
+    irn_data = response.get("data") or response or {}
+    if isinstance(irn_data, dict) and (irn_data.get("Data") or irn_data.get("data")):
+        irn_data = irn_data.get("Data") or irn_data.get("data")
+    if not isinstance(irn_data, dict):
+        irn_data = {}
+    irn_value = irn_data.get("Irn") or irn_data.get("irn")
+    signed_qr = irn_data.get("SignedQRCode") or irn_data.get("signed_qr_code")
+
+    # Render the QR (preferring the signed JWT QR string, falling back to the IRN).
+    qr_png_b64 = ""
+    qr_payload = signed_qr or irn_value
+    if qr_payload:
+        try:
+            import io, base64
+            import qrcode
+            qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,
+                               box_size=10, border=2)
+            qr.add_data(qr_payload)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="#0d1b2a", back_color="white")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            qr_png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        except Exception as e:
+            logger.warning("QR render failed: %s", e)
+
+    return JSONResponse({
+        "ok":      True,
+        "irn":     irn_value,
+        "ack_no":  irn_data.get("AckNo") or irn_data.get("ack_no"),
+        "ack_dt":  irn_data.get("AckDt") or irn_data.get("ack_dt"),
+        "signed_qr":      signed_qr,
+        "signed_invoice": irn_data.get("SignedInvoice") or irn_data.get("signed_invoice"),
+        "qr_png_b64":     qr_png_b64,
+        # E-Way Bill fields — populated only when EwbDtls was supplied.
+        "ewb_no":         irn_data.get("EwbNo")        or irn_data.get("ewb_no"),
+        "ewb_dt":         irn_data.get("EwbDt")        or irn_data.get("ewb_dt"),
+        "ewb_valid_till": irn_data.get("EwbValidTill") or irn_data.get("ewb_valid_till"),
+        "raw":     response,
+    })
+
+
+async def handle_einvoice_cancel(request: Request):
+    """Cancel an IRN. Body: {irn, reason_code, remarks}."""
+    try:
+        form = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    irn         = (form.get("irn") or "").strip()
+    reason_code = str(form.get("reason_code") or "1")
+    remarks     = (form.get("remarks") or "Cancelled via TallyPrime Assistant").strip()
+    if not irn:
+        return JSONResponse({"error": "irn is required"}, status_code=400)
+
+    client = get_einv_client()
+    try:
+        response = await client.cancel_irn(irn, reason_code, remarks)
+    except EInvoiceConfigError as e:
+        return JSONResponse(e.to_dict(), status_code=500)
+    except EInvoiceError as e:
+        return JSONResponse(e.to_dict(), status_code=502)
+    return JSONResponse({"ok": True, "raw": response})
+
+
+# GSTIN state-code → state-name map. The e-invoice form stores codes like
+# "29" (Karnataka), "27" (Maharashtra), etc., but TallyPrime ledger fields
+# expect the full state name, so we translate before posting.
+GST_STATE_CODE_TO_NAME = {
+    "01": "Jammu and Kashmir",
+    "02": "Himachal Pradesh",
+    "03": "Punjab",
+    "04": "Chandigarh",
+    "05": "Uttarakhand",
+    "06": "Haryana",
+    "07": "Delhi",
+    "08": "Rajasthan",
+    "09": "Uttar Pradesh",
+    "10": "Bihar",
+    "11": "Sikkim",
+    "12": "Arunachal Pradesh",
+    "13": "Nagaland",
+    "14": "Manipur",
+    "15": "Mizoram",
+    "16": "Tripura",
+    "17": "Meghalaya",
+    "18": "Assam",
+    "19": "West Bengal",
+    "20": "Jharkhand",
+    "21": "Odisha",
+    "22": "Chhattisgarh",
+    "23": "Madhya Pradesh",
+    "24": "Gujarat",
+    "26": "Dadra and Nagar Haveli and Daman and Diu",
+    "27": "Maharashtra",
+    "29": "Karnataka",
+    "30": "Goa",
+    "31": "Lakshadweep",
+    "32": "Kerala",
+    "33": "Tamil Nadu",
+    "34": "Puducherry",
+    "35": "Andaman and Nicobar Islands",
+    "36": "Telangana",
+    "37": "Andhra Pradesh",
+    "38": "Ladakh",
+    "96": "Other Country",
+}
+
+
+def _state_name(code_or_name: str) -> str:
+    """Return the state name for a GSTIN state code; pass-through if already a name."""
+    s = str(code_or_name or "").strip()
+    if not s:
+        return ""
+    # If it's already a 2-digit numeric code, look it up. Otherwise assume name.
+    if s.isdigit() and len(s) <= 2:
+        return GST_STATE_CODE_TO_NAME.get(s.zfill(2), s)
+    return s
+
+
+async def handle_voucher_from_einvoice(request: Request):
+    """Post a Sales voucher to TallyPrime using the e-invoice form + IRN.
+
+    Body:
+      {
+        "form":   { ...flat e-invoice form (same shape PWA submits)... },
+        "irn":    "<irn>",
+        "ack_no": "<ack number>",
+        "ack_dt": "<ack date>",
+        # Optional ledger overrides:
+        "sales_ledger_template": "GST Sales {rate}%",
+        "cgst_ledger": "CGST",
+        "sgst_ledger": "SGST",
+        "igst_ledger": "IGST",
+      }
+
+    Maps the form to TallyPrime sales-voucher fields, computes per-line
+    GST split from intra/interstate detection, and adds the IRN/AckNo/AckDt
+    to the narration.  No LLM in the loop.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    form      = body.get("form") or {}
+    irn       = body.get("irn", "") or ""
+    ack_no    = body.get("ack_no", "") or ""
+    ack_dt    = body.get("ack_dt", "") or ""
+    signed_qr = body.get("signed_qr", "") or ""
+    ewb_no    = body.get("ewb_no", "") or ""
+    ewb_dt    = body.get("ewb_dt", "") or ""
+    ewb_veh_no = (body.get("ewb_veh_no") or "").strip().upper()
+
+    # ── Convert NIC's "YYYY-MM-DD HH:MM:SS" ack date to Tally's two formats ──
+    # Tally <IRNACKDATE>          wants YYYYMMDD          (8 digits)
+    # Tally <IRNACKUPDATEDATETIME> wants YYYYMMDDHHMMSSsss (17 digits, 000 ms)
+    irn_ack_date     = ""
+    irn_ack_datetime = ""
+    if ack_dt:
+        try:
+            from datetime import datetime
+            dt = datetime.strptime(ack_dt.strip(), "%Y-%m-%d %H:%M:%S")
+            irn_ack_date     = dt.strftime("%Y%m%d")
+            irn_ack_datetime = dt.strftime("%Y%m%d%H%M%S") + "000"
+        except ValueError:
+            # If NIC ever returns just a date or a different format, pass-through.
+            digits = "".join(c for c in ack_dt if c.isdigit())
+            if len(digits) >= 8:
+                irn_ack_date = digits[:8]
+            if len(digits) >= 14:
+                irn_ack_datetime = digits[:14] + "000"
+
+    # ── Convert NIC's EwbDt ("YYYY-MM-DD HH:MM:SS" or "DD/MM/YYYY") → YYYYMMDD ──
+    ewb_date_tally = ""
+    if ewb_dt:
+        s = ewb_dt.strip()
+        try:
+            from datetime import datetime
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y", "%d/%m/%Y %H:%M:%S"):
+                try:
+                    dt = datetime.strptime(s, fmt)
+                    ewb_date_tally = dt.strftime("%Y%m%d")
+                    break
+                except ValueError:
+                    continue
+        except Exception:
+            pass
+        if not ewb_date_tally:
+            digits = "".join(c for c in s if c.isdigit())
+            if len(digits) >= 8:
+                ewb_date_tally = digits[:8]
+
+    seller = form.get("seller") or {}
+    buyer  = form.get("buyer")  or {}
+    items  = form.get("items")  or []
+
+    # ── Validation ──────────────────────────────────────────────
+    if not buyer.get("legal_name"):
+        return JSONResponse({"error": "Buyer legal name is required"}, status_code=400)
+    if not items:
+        return JSONResponse({"error": "At least one line item is required"}, status_code=400)
+
+    # ── Date conversion: DD/MM/YYYY → YYYYMMDD ──────────────────
+    doc_date = (form.get("doc_date") or "").strip()
+    if "/" in doc_date:
+        try:
+            d, m, y = doc_date.split("/")
+            tally_date = f"{y}{m.zfill(2)}{d.zfill(2)}"
+        except Exception:
+            return JSONResponse({"error": f"Could not parse doc_date '{doc_date}' as DD/MM/YYYY"}, status_code=400)
+    elif "-" in doc_date and len(doc_date) >= 10:
+        # Tolerate DD-MM-YYYY or YYYY-MM-DD
+        parts = doc_date.split("-")
+        if len(parts[0]) == 4:
+            tally_date = parts[0] + parts[1].zfill(2) + parts[2].zfill(2)
+        else:
+            tally_date = parts[2] + parts[1].zfill(2) + parts[0].zfill(2)
+    else:
+        tally_date = doc_date
+
+    # ── Tax split: intrastate (CGST+SGST) vs interstate (IGST) ──
+    intrastate = str(seller.get("stcd", "")).strip() == str(buyer.get("pos", "")).strip()
+
+    # ── Ledger naming overrides (with sensible defaults) ────────
+    sales_template = body.get("sales_ledger_template") or "GST Sales {rate}%"
+    cgst_ledger    = body.get("cgst_ledger") or "CGST"
+    sgst_ledger    = body.get("sgst_ledger") or "SGST"
+    igst_ledger    = body.get("igst_ledger") or "IGST"
+
+    # ── Build per-line items + roll up totals ───────────────────
+    line_items   = []
+    tot_cgst     = 0.0
+    tot_sgst     = 0.0
+    tot_igst     = 0.0
+    for it in items:
+        qty       = float(it.get("qty") or 0)
+        rate      = float(it.get("rate") or 0)
+        discount  = float(it.get("discount") or 0)
+        gst_rate  = float(it.get("gst_rate") or 0)
+        ass_amt   = round(qty * rate - discount, 2)
+        gst_amt   = round(ass_amt * gst_rate / 100.0, 2)
+        cgst_amt  = round(gst_amt / 2, 2) if intrastate else 0.0
+        sgst_amt  = round(gst_amt / 2, 2) if intrastate else 0.0
+        igst_amt  = 0.0 if intrastate else gst_amt
+
+        # Format the per-line sales ledger name from the template.
+        rate_str = str(int(gst_rate)) if gst_rate == int(gst_rate) else str(gst_rate)
+        sales_ledger = sales_template.replace("{rate}", rate_str)
+
+        line = {
+            "stock_item_name": it.get("desc", "")[:100],
+            "sales_ledger":    sales_ledger,
+            "amount":          ass_amt,
+            "rate":            rate,
+            "quantity":        qty,
+            "unit":            (it.get("unit") or "Nos"),
+            "gst_rate":        gst_rate,
+        }
+        if it.get("hsn"):       line["hsn"] = str(it["hsn"])
+        if discount > 0:        line["discount_amount"] = discount
+
+        line_items.append(line)
+        tot_cgst += cgst_amt
+        tot_sgst += sgst_amt
+        tot_igst += igst_amt
+
+    # ── Narration ───────────────────────────────────────────────
+    # The IRN/AckNo/AckDt now go into TallyPrime's dedicated XML tags
+    # (<IRN>, <IRNACKNO>, <IRNACKDATE>, <IRNACKUPDATEDATETIME>, <IRNQRCODE>),
+    # so we keep narration empty unless caller passes one explicitly.
+    narration = (body.get("narration") or "").strip()
+
+    # ── Translate GSTIN state codes to TallyPrime state names ───
+    # Tally expects "Maharashtra", "Karnataka" etc. — not "27", "29".
+    buyer_state_name    = _state_name(buyer.get("stcd"))
+    place_of_supply_nm  = _state_name(buyer.get("pos"))
+
+    # ── Call TallyPrime ─────────────────────────────────────────
+    from . import tally_client as tc
+    try:
+        result = tc.create_sales_voucher(
+            date=tally_date,
+            party_ledger=buyer.get("legal_name", ""),
+            items=line_items,
+            voucher_type=body.get("voucher_type") or "Sales",
+            voucher_number=str(form.get("doc_no") or ""),
+            narration=narration,
+            cgst_ledger=cgst_ledger if intrastate else "",
+            cgst_amount=round(tot_cgst, 2),
+            sgst_ledger=sgst_ledger if intrastate else "",
+            sgst_amount=round(tot_sgst, 2),
+            igst_ledger="" if intrastate else igst_ledger,
+            igst_amount=round(tot_igst, 2),
+            gst_registration_type="Regular",
+            party_gstin=buyer.get("gstin", ""),
+            place_of_supply=place_of_supply_nm,
+            state_name=buyer_state_name,
+            # NIC IRP schema-1.1 buyer is always domestic; default country India.
+            # If you ever support export invoices, surface buyer.country in the form
+            # and pass it through here.
+            country=(buyer.get("country") or "India"),
+            cmp_gstin=seller.get("gstin", ""),
+            # E-Invoice fields → TallyPrime's dedicated XML tags
+            irn=irn,
+            irn_qr_code=signed_qr,
+            irn_ack_no=str(ack_no) if ack_no else "",
+            irn_ack_date=irn_ack_date,
+            irn_ack_datetime=irn_ack_datetime,
+            # E-Way Bill fields → <EWAYBILLDETAILS.LIST>
+            ewb_no=str(ewb_no) if ewb_no else "",
+            ewb_date=ewb_date_tally,
+            ewb_veh_no=ewb_veh_no,
+            # TransMode/VehType are hardcoded "1"/"R" matching the NIC payload.
+        )
+    except Exception as e:
+        logger.exception("Sales voucher post failed")
+        return JSONResponse(
+            {"error": f"Tally voucher creation failed: {e}", "stage": "tally_call"},
+            status_code=500,
+        )
+
+    # tally_client returns {"success": True, ...} on success, or
+    # {"error": "..."} on Tally-side errors. Pass through.
+    if isinstance(result, dict) and result.get("error"):
+        return JSONResponse(
+            {"error": result["error"], "stage": "tally_response", "raw": result},
+            status_code=502,
+        )
+
+    return JSONResponse({
+        "ok":              True,
+        "voucher_number":  form.get("doc_no") or result.get("voucher_number") if isinstance(result, dict) else None,
+        "narration":       narration,
+        "intrastate":      intrastate,
+        "totals":          {
+            "cgst":  round(tot_cgst, 2),
+            "sgst":  round(tot_sgst, 2),
+            "igst":  round(tot_igst, 2),
+        },
+        "result":          result,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Ledger creation — direct PWA → MCP → Tally (no LLM in the loop)
+# ─────────────────────────────────────────────────────────────────────
+async def handle_ledger_create(request: Request):
+    """Create a ledger in TallyPrime.
+
+    Body: { ledger_type: "party" | "sales" | "purchase" | "duty",
+            name: "...", ...type-specific fields }
+
+    Dispatches to the matching tally_client.create_*_ledger function so the
+    PWA never has to know which XML envelope to build.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    ltype = (body.get("ledger_type") or "").strip().lower()
+    name  = (body.get("name") or "").strip()
+
+    if not ltype:
+        return JSONResponse({"error": "ledger_type is required (party | sales | purchase | duty)"}, status_code=400)
+    if not name:
+        return JSONResponse({"error": "name is required"}, status_code=400)
+
+    from . import tally_client as tc
+    try:
+        if ltype == "party":
+            result = tc.create_party_ledger(
+                name=name,
+                parent=body.get("parent") or "Sundry Debtors",
+                opening_balance=float(body.get("opening_balance") or 0),
+                gstin=(body.get("gstin") or "").upper(),
+                gst_registration_type=body.get("gst_registration_type") or "Regular",
+                address=body.get("address") or "",
+                state=body.get("state") or "",
+                country=body.get("country") or "India",
+                pincode=body.get("pincode") or "",
+                phone=body.get("phone") or "",
+                email=body.get("email") or "",
+                credit_period=body.get("credit_period") or "",
+                credit_limit=float(body.get("credit_limit") or 0),
+            )
+
+        elif ltype == "sales":
+            if not body.get("effective_date"):
+                return JSONResponse({"error": "effective_date is required for sales ledger"}, status_code=400)
+            result = tc.create_sales_ledger(
+                name=name,
+                effective_date=body.get("effective_date"),
+                parent=body.get("parent") or "Sales Accounts",
+                gst_type_of_supply=body.get("gst_type_of_supply") or "Goods",
+                taxability=body.get("taxability") or "Taxable",
+                gst_nature_of_transaction=body.get("gst_nature_of_transaction") or "",
+                hsn_sac_code=body.get("hsn_sac_code") or "",
+                hsn_description=body.get("hsn_description") or "",
+                gst_rate=float(body.get("gst_rate") or 0),
+                is_reverse_charge=bool(body.get("is_reverse_charge") or False),
+            )
+
+        elif ltype == "purchase":
+            if not body.get("effective_date"):
+                return JSONResponse({"error": "effective_date is required for purchase ledger"}, status_code=400)
+            result = tc.create_purchase_ledger(
+                name=name,
+                effective_date=body.get("effective_date"),
+                parent=body.get("parent") or "Purchase Accounts",
+                gst_type_of_supply=body.get("gst_type_of_supply") or "Goods",
+                taxability=body.get("taxability") or "Taxable",
+                gst_nature_of_transaction=body.get("gst_nature_of_transaction") or "Interstate Purchase - Taxable",
+                hsn_sac_code=body.get("hsn_sac_code") or "",
+                hsn_description=body.get("hsn_description") or "",
+                gst_rate=float(body.get("gst_rate") or 0),
+                is_reverse_charge=bool(body.get("is_reverse_charge") or False),
+                is_ineligible_itc=bool(body.get("is_ineligible_itc") or False),
+            )
+
+        elif ltype == "duty":
+            duty_head = (body.get("duty_head") or "").strip()
+            if not duty_head:
+                return JSONResponse({"error": "duty_head is required for duty ledger (CGST | SGST/UTGST | IGST | Cess)"}, status_code=400)
+            result = tc.create_duty_ledger(
+                name=name,
+                duty_head=duty_head,
+                parent=body.get("parent") or "Duties & Taxes",
+                rate_of_tax=float(body.get("rate_of_tax") or 0),
+                cess_valuation_method=body.get("cess_valuation_method") or "Based on Value",
+            )
+
+        else:
+            return JSONResponse(
+                {"error": f"Unknown ledger_type '{ltype}'. Use: party | sales | purchase | duty"},
+                status_code=400,
+            )
+    except Exception as e:
+        logger.exception("Ledger creation failed")
+        return JSONResponse(
+            {"error": f"Ledger creation failed: {e}", "stage": "tally_call"},
+            status_code=500,
+        )
+
+    # tally_client returns {"status": "success" | "error" | "no_change", ...}
+    if isinstance(result, dict) and result.get("status") == "error":
+        return JSONResponse({"ok": False, **result}, status_code=502)
+    return JSONResponse({"ok": True, **(result if isinstance(result, dict) else {"raw": result})})
+
+
+async def handle_einvoice_pdf(request: Request):
+    """Render a printable HTML invoice with IRN + QR. Browser → Print → Save as PDF.
+
+    Body: { form: {...flat form...}, irn: "...", ack_no, ack_dt, signed_qr }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    form     = body.get("form") or {}
+    irn      = body.get("irn", "")
+    ack_no   = body.get("ack_no", "")
+    ack_dt   = body.get("ack_dt", "")
+    qr_data  = body.get("signed_qr", "") or irn  # encode signed_qr into the QR if available
+
+    seller   = form.get("seller") or {}
+    buyer    = form.get("buyer")  or {}
+    items    = form.get("items")  or []
+
+    # Inline QR via the qrcode lib already installed for the install page.
+    try:
+        import io, base64
+        import qrcode
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
+        qr.add_data(qr_data or irn or "no-irn")
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="#0d1b2a", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        qr_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as e:
+        logger.warning("QR render failed: %s", e)
+        qr_b64 = ""
+
+    # Build a compact, print-friendly HTML invoice.
+    def _fmt_inr(n) -> str:
+        try:
+            n = float(n or 0)
+        except (TypeError, ValueError):
+            return "-"
+        # Indian comma style for the integer part
+        s = f"{n:,.2f}"
+        parts = s.split(".")
+        i, dec = parts[0].replace(",", ""), parts[1]
+        if len(i) <= 3:
+            grouped = i
+        else:
+            last3, rest = i[-3:], i[:-3]
+            groups = []
+            while len(rest) > 2:
+                groups.insert(0, rest[-2:])
+                rest = rest[:-2]
+            if rest:
+                groups.insert(0, rest)
+            grouped = ",".join(groups + [last3])
+        return f"&#8377; {grouped}.{dec}"
+
+    rows_html = []
+    for i, it in enumerate(items, 1):
+        qty   = float(it.get("qty") or 0)
+        rate  = float(it.get("rate") or 0)
+        gstrt = float(it.get("gst_rate") or 0)
+        ass   = round(qty * rate - float(it.get("discount") or 0), 2)
+        gst   = round(ass * gstrt / 100, 2)
+        total = round(ass + gst, 2)
+        rows_html.append(f"""
+            <tr>
+              <td>{i}</td>
+              <td>{(it.get("desc") or "")[:80]}</td>
+              <td>{it.get("hsn","")}</td>
+              <td class="num">{qty}</td>
+              <td>{(it.get("unit","") or "").upper()}</td>
+              <td class="num">{_fmt_inr(rate)}</td>
+              <td class="num">{_fmt_inr(ass)}</td>
+              <td class="num">{gstrt}%</td>
+              <td class="num">{_fmt_inr(gst)}</td>
+              <td class="num"><strong>{_fmt_inr(total)}</strong></td>
+            </tr>
+        """)
+
+    grand_total = sum(
+        round(float(it.get("qty") or 0) * float(it.get("rate") or 0)
+              - float(it.get("discount") or 0), 2)
+        * (1 + float(it.get("gst_rate") or 0) / 100)
+        for it in items
+    )
+
+    qr_img_html = (
+        f'<img src="data:image/png;base64,{qr_b64}" alt="IRN QR" style="width:170px;height:170px;">'
+        if qr_b64 else
+        '<div style="width:170px;height:170px;border:2px dashed #999;display:flex;align-items:center;justify-content:center;color:#999;font-size:12px;">QR unavailable</div>'
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>e-Invoice {form.get('doc_no','')}</title>
+  <style>
+    @page {{ size: A4; margin: 14mm; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+           color:#16203A; font-size:12px; padding: 0; margin: 0; }}
+    h1 {{ font-size: 20px; margin: 0 0 4px; }}
+    .small {{ font-size: 11px; color:#4B5670; }}
+    .label {{ font-size: 10px; color:#8B95AB; text-transform: uppercase; letter-spacing: 0.5px; }}
+    .head {{ display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #0d1b2a; padding-bottom:10px; margin-bottom:12px; }}
+    .irn-box {{ background:#EEF4FB; border:1px solid #BBD4F2; border-radius:8px; padding:10px 12px; margin-bottom:12px; display:flex; gap:14px; align-items:center; }}
+    .irn-box .col {{ flex:1; min-width:0; }}
+    .irn-box code {{ font-family: 'SF Mono', Menlo, monospace; font-size:11px; word-break: break-all; display:block; }}
+    .parties {{ display:flex; gap:16px; margin-bottom:12px; }}
+    .party {{ flex:1; border:1px solid #E4E8EF; border-radius:8px; padding:10px; }}
+    .party h3 {{ font-size:11px; margin:0 0 6px; color:#8B95AB; text-transform:uppercase; letter-spacing:0.5px;}}
+    .party strong {{ font-size:13px; }}
+    table {{ width:100%; border-collapse:collapse; margin: 8px 0; font-size: 11px; }}
+    th, td {{ padding: 6px 7px; border: 1px solid #E4E8EF; text-align:left; }}
+    th {{ background:#0d1b2a; color:white; font-weight:700; font-size:10px; text-transform:uppercase; letter-spacing:0.4px;}}
+    .num {{ text-align:right; }}
+    .totals {{ display:flex; justify-content:flex-end; margin-top:6px; }}
+    .totals .grand {{ font-weight:800; font-size:14px; color:#0d1b2a; }}
+    .footer {{ margin-top:18px; font-size:10px; color:#8B95AB; }}
+    .print-btn {{ position:fixed; top:14px; right:14px; padding:8px 14px; background:#1565C0; color:white; border:none; border-radius:8px; font-weight:700; cursor:pointer; }}
+    @media print {{ .print-btn {{ display:none; }} }}
+  </style>
+</head>
+<body>
+  <button class="print-btn" onclick="window.print()">🖨 Print / Save PDF</button>
+  <div class="head">
+    <div>
+      <h1>Tax Invoice</h1>
+      <div class="small">e-Invoice — IRN signed by NIC IRP</div>
+    </div>
+    <div style="text-align:right;">
+      <div class="label">Invoice No</div>
+      <div><strong>{form.get('doc_no','')}</strong></div>
+      <div class="label" style="margin-top:6px;">Date</div>
+      <div>{form.get('doc_date','')}</div>
+    </div>
+  </div>
+
+  <div class="irn-box">
+    <div class="col">
+      <div class="label">IRN</div>
+      <code>{irn or '—'}</code>
+      <div class="label" style="margin-top:6px;">Ack No / Ack Date</div>
+      <div class="small">{ack_no or '—'} &nbsp;&middot;&nbsp; {ack_dt or '—'}</div>
+    </div>
+    <div>{qr_img_html}</div>
+  </div>
+
+  <div class="parties">
+    <div class="party">
+      <h3>Seller</h3>
+      <strong>{seller.get('legal_name','')}</strong><br>
+      <span class="small">GSTIN: {seller.get('gstin','')}</span><br>
+      <span class="small">{seller.get('addr1','')} {seller.get('addr2','')}</span><br>
+      <span class="small">{seller.get('loc','')} - {seller.get('pin','')} ({seller.get('stcd','')})</span>
+    </div>
+    <div class="party">
+      <h3>Buyer</h3>
+      <strong>{buyer.get('legal_name','')}</strong><br>
+      <span class="small">GSTIN: {buyer.get('gstin','')}</span><br>
+      <span class="small">{buyer.get('addr1','')} {buyer.get('addr2','')}</span><br>
+      <span class="small">{buyer.get('loc','')} - {buyer.get('pin','')} ({buyer.get('stcd','')})</span><br>
+      <span class="small">Place of Supply: {buyer.get('pos','')}</span>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th><th>Description</th><th>HSN</th><th>Qty</th><th>Unit</th>
+        <th>Rate</th><th>Taxable</th><th>GST</th><th>GST Amt</th><th>Total</th>
+      </tr>
+    </thead>
+    <tbody>{''.join(rows_html) or '<tr><td colspan="10" style="text-align:center;color:#999;">No items</td></tr>'}</tbody>
+  </table>
+
+  <div class="totals">
+    <div>
+      <div class="label" style="text-align:right;">Grand Total</div>
+      <div class="grand">{_fmt_inr(round(grand_total, 2))}</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Generated by TallyPrime Assistant. IRN issued by NIC IRP via Clear GSP. This is a computer-generated tax invoice.
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(html)
+
+
 # ─────────────────────────────────────────────────────────────────
 # Starlette app
 # ─────────────────────────────────────────────────────────────────
 
 starlette_app = Starlette(
     routes=[
-        Route("/health",   health,          methods=["GET"]),
-        Route("/app",      handle_app,      methods=["GET"]),
-        Route("/chat",     handle_chat,     methods=["POST"]),
+        Route("/health",             health,                  methods=["GET"]),
+        Route("/app",                handle_app,              methods=["GET"]),
+        Route("/install",            handle_install,          methods=["GET"]),
+        Route("/install-qr.png",     handle_install_qr_png,   methods=["GET"]),
+        Route("/install-qr.svg",     handle_install_qr_svg,   methods=["GET"]),
+        Route("/chat",               handle_chat,             methods=["POST"]),
+        Route("/transcribe",         handle_transcribe,       methods=["POST"]),
+        Route("/einvoice/generate",        handle_einvoice_generate,     methods=["POST"]),
+        Route("/einvoice/cancel",          handle_einvoice_cancel,       methods=["POST"]),
+        Route("/einvoice/pdf",             handle_einvoice_pdf,          methods=["POST"]),
+        Route("/voucher/sales/from-einvoice", handle_voucher_from_einvoice, methods=["POST"]),
+        Route("/ledger/create",            handle_ledger_create,          methods=["POST"]),
         Mount("/sse/messages", app=sse_transport.handle_post_message),
         Mount("/sse",          app=handle_sse),
         Mount("/messages",     app=sse_transport.handle_post_message),
@@ -858,5 +1669,4 @@ def run():
     uvicorn.run(asgi_app, host=HOST, port=PORT)
 
 
-if __name__ == "__main__":
-    run()
+if __name__

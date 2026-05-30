@@ -74,7 +74,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_ledger",
-            description="Get full details of a specific ledger including GSTIN, PAN, address, credit terms, and bill-wise settings.",
+            description="Get full details of a specific ledger including GSTIN, PAN, contact person name, phone, email, address, credit terms, and bill-wise settings.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1397,5 +1397,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    import

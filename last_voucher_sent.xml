@@ -1,0 +1,107 @@
+<ENVELOPE>
+    <HEADER>
+        <VERSION>1</VERSION>
+        <TALLYREQUEST>Import</TALLYREQUEST>
+        <TYPE>Data</TYPE>
+        <ID>Vouchers</ID>
+    </HEADER>
+    <BODY>
+        <DESC>
+            <STATICVARIABLES>
+                <SVVCHIMPORTFORMAT>XML</SVVCHIMPORTFORMAT>
+            </STATICVARIABLES>
+            <TALLYMESSAGE>
+                <VOUCHER VCHTYPE="Sales" ACTION="Create" OBJVIEW="Invoice Voucher View">
+                    <OBJECTUPDATEACTION>Create</OBJECTUPDATEACTION>
+                    <ISINVOICE>Yes</ISINVOICE>
+                    <VCHENTRYMODE>Item Invoice</VCHENTRYMODE>
+                    <DATE>20260430</DATE>
+                    <IRNACKDATE>20260430</IRNACKDATE>
+                    <VOUCHERTYPENAME>Sales</VOUCHERTYPENAME>
+                    <VOUCHERNUMBER>SANT-PWA-005</VOUCHERNUMBER>
+                    <PARTYLEDGERNAME>Manoj</PARTYLEDGERNAME>
+                    <IRN>9308c96d6707f22434746d1fb706fa54026ff789f15a7406931ddc820165a5c7</IRN>
+                    <GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE>
+                    <STATENAME>Maharashtra</STATENAME>
+                    <PARTYGSTIN>27GSPMH1881G1ZH</PARTYGSTIN>
+                    <PLACEOFSUPPLY>Maharashtra</PLACEOFSUPPLY>
+                    <CMPGSTIN>29AACCT3705E1ZJ</CMPGSTIN>
+                    <GSTREGISTRATION.LIST>
+                        <REGISTRATIONNAME>GST</REGISTRATIONNAME>
+                        <APPLICABLEFROM>20260430</APPLICABLEFROM>
+                        <STATE>Maharashtra</STATE>
+                        <REGISTRATIONNUMBER>29AACCT3705E1ZJ</REGISTRATIONNUMBER>
+                    </GSTREGISTRATION.LIST>
+                    <IRNQRCODE>eyJhbGciOiJSUzI1NiIsImtpZCI6IjNCRTE3RTUxNDE5MjUyMjY0N0YwMUZEQkZGNTI3MUFENTI2OEQ3MzUiLCJ4NXQiOiJPLUYtVVVHU1VpWkg4Ql9iXzFKeHJWSm8xelUiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJOSUMgU2FuZGJveCIsImRhdGEiOiJ7XCJTZWxsZXJHc3RpblwiOlwiMjlBQUNDVDM3MDVFMVpKXCIsXCJCdXllckdzdGluXCI6XCIyN0dTUE1IMTg4MUcxWkhcIixcIkRvY05vXCI6XCJTQU5ULVBXQS0wMDVcIixcIkRvY1R5cFwiOlwiSU5WXCIsXCJEb2NEdFwiOlwiMzAvMDQvMjAyNlwiLFwiVG90SW52VmFsXCI6MTc3MC4wLFwiSXRlbUNudFwiOjEsXCJNYWluSHNuQ29kZVwiOlwiODQyMTE5XCIsXCJJcm5cIjpcIjkzMDhjOTZkNjcwN2YyMjQzNDc0NmQxZmI3MDZmYTU0MDI2ZmY3ODlmMTVhNzQwNjkzMWRkYzgyMDE2NWE1YzdcIixcIklybkR0XCI6XCIyMDI2LTA0LTMwIDE2OjE5OjAwXCJ9In0.owkQ0P9HkuVfSYIKwjMKQRM9hdb0n3joqXLTkDPZEGX_Q-yeqY21xhmXD3i0HgD3ENft-Bs4TA-yiQNBxOBPbWF5wcGBHmLG0cDHCCDFBSaYA-BS4i9IMb-2rm2T-JrLO95gd76QeV1136fF-OkvCc7P5wHkpbFa-_6vJXQn-cwnRWDVERKHE9h-ZGqcKHxytI8vCvH5XCIII08LDjt22m_yAv6rLIQ8xgE04mYdn980Jc2_0gz-bFA3svCeM10yzssTVkJwxKeairrec9mnHojs54CffQNlcsLbtY2RpyenRKhxsAKjOnFe9wLvK1Um4NtYbSUUsRolmM_XgDuHtQ</IRNQRCODE>
+                    <RESETIRNQRCODE>No</RESETIRNQRCODE>
+                    <IRNJSONEXPORTED>No</IRNJSONEXPORTED>
+                    <IRNCANCELLED>No</IRNCANCELLED>
+                    <IRNACKNO>112610250191427</IRNACKNO>
+                    <IRNIRPSOURCE>NIC1</IRNIRPSOURCE>
+                    <NARRATION></NARRATION>
+                    <ALLINVENTORYENTRIES.LIST>
+                        <STOCKITEMNAME>Amul Ghee</STOCKITEMNAME>
+                        <HSNMASTERNAME>842119</HSNMASTERNAME>
+                        <GSTOVRDNTAXABILITY>Taxable</GSTOVRDNTAXABILITY>
+                        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>No</ISLASTDEEMEDPOSITIVE>
+                        <GSTOVRDNISREVCHARGEAPPL>Not Applicable</GSTOVRDNISREVCHARGEAPPL>
+                        <RATE>1500.0/NOS</RATE>
+                        
+                        <AMOUNT>1500.0</AMOUNT>
+                        
+                        <ACTUALQTY>1.0 NOS</ACTUALQTY>
+                        <BILLEDQTY>1.0 NOS</BILLEDQTY>
+                        <BATCHALLOCATIONS.LIST>
+                            <GODOWNNAME>Main Location</GODOWNNAME>
+                            <BATCHNAME>Primary Batch</BATCHNAME>
+                            <AMOUNT>1500.0</AMOUNT>
+                            
+                            <ACTUALQTY>1.0 NOS</ACTUALQTY>
+                            <BILLEDQTY>1.0 NOS</BILLEDQTY>
+                        </BATCHALLOCATIONS.LIST>
+                        <ACCOUNTINGALLOCATIONS.LIST>
+                            <LEDGERNAME>GST Sales 18%</LEDGERNAME>
+                            <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                            <AMOUNT>1500.0</AMOUNT>
+                        </ACCOUNTINGALLOCATIONS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+                            <GSTRATE>9.0</GSTRATE>
+                        </RATEDETAILS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+                            <GSTRATE>9.0</GSTRATE>
+                        </RATEDETAILS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+                            <GSTRATE>18.0</GSTRATE>
+                        </RATEDETAILS.LIST>
+                        <RATEDETAILS.LIST>
+                            <GSTRATEDUTYHEAD>Cess</GSTRATEDUTYHEAD>
+                            <GSTRATEVALUATIONTYPE>Not Applicable</GSTRATEVALUATIONTYPE>
+                        </RATEDETAILS.LIST>
+                    </ALLINVENTORYENTRIES.LIST>
+                    <LEDGERENTRIES.LIST>
+                        <LEDGERNAME>Manoj</LEDGERNAME>
+                        <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>Yes</ISLASTDEEMEDPOSITIVE>
+                        <AMOUNT>-1770.0</AMOUNT>
+                    </LEDGERENTRIES.LIST>
+                    
+                    <LEDGERENTRIES.LIST>
+                        <LEDGERNAME>IGST</LEDGERNAME>
+                        <METHODTYPE>GST</METHODTYPE>
+                        <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+                        <ISLASTDEEMEDPOSITIVE>No</ISLASTDEEMEDPOSITIVE>
+                        <AMOUNT>270.0</AMOUNT>
+                    </LEDGERENTRIES.LIST>
+                    
+                </VOUCHER>
+            </TALLYMESSAGE>
+        </DESC>
+    </BODY>
+</ENVELOPE>

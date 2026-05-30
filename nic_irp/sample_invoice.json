@@ -1,0 +1,75 @@
+[{
+        "Version": "1.1",
+        "TranDtls": {
+            "TaxSch": "GST",
+            "SupTyp": "B2B",
+            "RegRev": "N",
+            "IgstOnIntra": "N"
+        },
+        "DocDtls": {
+            "Typ": "INV",
+            "No": "SANT695",
+            "Dt": "30/04/2026"
+        },
+        "SellerDtls": {
+            "Gstin": "29AACCT3705E1ZJ",
+            "LglNm": "1.KAMAL AUTOMOBILES",
+            "Addr1": "Opp. Ashoka Cinema, Udaipur",
+            "Addr2": null,
+            "Loc": "67u",
+            "Pin": 560100,
+            "Stcd": "29"
+        },
+        "BuyerDtls": {
+            "Gstin": "27GSPMH1881G1ZH",
+            "LglNm": "Air Port Director",
+            "Pos": "27",
+            "Addr1": "rtyui",
+            "Addr2": null,
+            "Loc": "rtyui",
+            "Pin": 400001,
+            "Stcd": "27"
+        },
+        "DispDtls": {
+            "Nm": "tyuio",
+            "Addr1": "rtyui",
+            "Addr2": null,
+            "Loc": "rtyui",
+            "Pin": 560100,
+            "Stcd": "29"
+        },
+        "ItemList": [{
+                "SlNo": "1",
+                "PrdDesc": "8421-Engine Filter",
+                "IsServc": "N",
+                "HsnCd": "842119",
+                "Qty": 1,
+                "FreeQty": 0,
+                "Unit": "NOS",
+                "UnitPrice": 1100,
+                "TotAmt": 1100,
+                "Discount": 0,
+                "AssAmt": 1100,
+                "GstRt": 18,
+                "IgstAmt": 198,
+                "CgstAmt": 0,
+                "SgstAmt": 0,
+                "CesRt": 0,
+                "CesAmt": 0,
+                "CesNonAdvlAmt": 0,
+                "TotItemVal": 1298
+            }
+        ],
+        "ValDtls": {
+            "AssVal": 1100,
+            "CgstVal": 0,
+            "SgstVal": 0,
+            "IgstVal": 198,
+            "CesVal": 0,
+            "Discount": 0,
+            "OthChrg": 0,
+            "RndOffAmt": 0,
+            "TotInvVal": 1298
+        }
+    }
+]

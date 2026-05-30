@@ -105,18 +105,30 @@ def parse_ledger_block(block_xml: str) -> dict:
     state   = _find_text(mailing, "STATE")   or ""
     pincode = _find_text(mailing, "PINCODE") or ""
 
-    # Phone: check LEDCONTACTDETAILS.LIST first, then top-level LEDGERPHONE
+    # Robust extraction: direct child → any descendant (.//TAG) → regex over the
+    # raw block. Ledger-master GSTIN is <GSTIN> (often nested in
+    # LEDGSTREGDETAILS.LIST), not the voucher-level <PARTYGSTIN>. Phone is
+    # <LEDGERMOBILE> on modern TallyPrime.
+    def _field(*tags: str) -> str:
+        for tag in tags:
+            val = _find_text(ledger, tag) or _find_text(ledger, f".//{tag}")
+            if not val:
+                m = re.search(rf"<{tag}\b[^>]*>([^<]*)</{tag}>", block_xml, re.IGNORECASE)
+                val = m.group(1).strip() if m else ""
+            if val:
+                return val
+        return ""
+
+    # Phone: contact-details sub-list first, then top-level mobile/phone tags.
     phone = ""
     contact = ledger.find("LEDCONTACTDETAILS.LIST")
     if contact is not None:
-        phone = _find_text(contact, "PHONENUMBER")
+        phone = _find_text(contact, "PHONENUMBER") or _find_text(contact, "LEDGERMOBILE")
     if not phone:
-        phone = _find_text(ledger, "LEDGERPHONE") or ""
+        phone = _field("LEDGERMOBILE", "LEDGERPHONE", "PHONENUMBER")
 
-    email = _find_text(ledger, "EMAIL") or ""
-    gstin = (_find_text(ledger, "PARTYGSTIN")
-             or _find_text(ledger, "LEDGSTIN")
-             or "")
+    email = _field("EMAIL")
+    gstin = _field("GSTIN", "PARTYGSTIN", "LEDGSTIN")
 
     return {
         "gstin":     gstin,
@@ -179,19 +191,4 @@ for name in party_names:
         print(f"  {'OK+pin' if pin else 'OK    '} : {name[:45]:<45}  pin={pin or '(none)':>6}  state={info.get('state', '')}")
         party_details.append({
             "party_name":  name,
-            "gstin":       info.get("gstin", ""),
-            "state":       info.get("state", ""),
-            "pincode":     pin,
-            "addresses":   info.get("addresses", []),
-            "phone":       info.get("phone", ""),
-            "email":       info.get("email", ""),
-            "outstanding": outstanding,
-        })
-
-os.makedirs(OUT_DIR, exist_ok=True)
-with open(OUT, "w", encoding="utf-8") as f:
-    json.dump(party_details, f, indent=2, ensure_ascii=False)
-
-total = len(party_details)
-print(f"\nParty details fetched -- {total} parties, {with_pin} with pin codes, {missing_pin} missing pin codes")
-print(f"Saved to: {OUT}")
+            "gstin":       info.g

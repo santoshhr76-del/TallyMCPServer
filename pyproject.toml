@@ -21,6 +21,12 @@ dependencies = [
     "starlette>=0.40.0",
     # AI chat endpoint
     "anthropic>=0.40.0",
+    # Load .env at startup so ANTHROPIC_API_KEY etc. work without manual export
+    "python-dotenv>=1.0.0",
+    # NIC IRP e-Invoice integration uses RSA + AES-256-ECB encryption
+    "cryptography>=41.0.0",
+    # E-invoice install QR + cancellation QR generation
+    "qrcode[pil]>=7.4.0",
 ]
 
 [project.scripts]
