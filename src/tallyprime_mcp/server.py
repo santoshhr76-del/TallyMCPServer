@@ -85,6 +85,143 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="get_ledgers_of_group",
+            description=(
+                "List every ledger under a Tally group (e.g. 'Sundry Debtors' or "
+                "'Sundry Creditors') with its opening and closing balance, including "
+                "ledgers filed under nested sub-groups. Optional from_date/to_date set "
+                "the reporting period: closing_balance is computed as of to_date and "
+                "opening_balance as of from_date. Sign convention follows Tally — debit "
+                "balances are negative, credit positive (Sundry Debtors parties are "
+                "normally negative, Sundry Creditors positive). Returns group, "
+                "from_date, to_date, ledger_count and a ledgers list "
+                "(name, parent, opening_balance, closing_balance)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "group_name": {
+                        "type": "string",
+                        "description": "Tally group to list (e.g. 'Sundry Debtors', 'Sundry Creditors').",
+                        "default": "Sundry Debtors",
+                    },
+                    "from_date": {
+                        "type": "string",
+                        "description": (
+                            "Optional period start. Accepts DD-MM-YYYY, DD/MM/YYYY, "
+                            "YYYY-MM-DD or YYYYMMDD. Sets opening_balance as of this date."
+                        ),
+                        "default": "",
+                    },
+                    "to_date": {
+                        "type": "string",
+                        "description": (
+                            "Optional period end / as-of date. Accepts DD-MM-YYYY, "
+                            "DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD. Sets closing_balance as "
+                            "of this date."
+                        ),
+                        "default": "",
+                    },
+                    **TALLY_URL_PROP,
+                },
+                "required": [],
+            },
+        ),
+        types.Tool(
+            name="Sundry_Debtors_Sch-III",
+            description=(
+                "Bill-wise ageing analysis of Sundry Debtors (receivables), via the custom "
+                "'MCP Group Ageing' TDL report — Tally itself computes the ageing, matching the "
+                "Group Outstandings age-wise export sign-for-sign. Requires tdl/mcp_group_ageing.txt "
+                "loaded in Tally (F1 > TDL & Add-Ons); if not loaded the tool returns an error "
+                "explaining how. Each party row has a total (net closing) plus buckets: '< 90 days', "
+                "'90 to 180 days', '180 to 365 days', '365 to 1035 days', '> 1035 days', 'On Account' "
+                "(aged by bill date). Debtor (Dr) amounts are negative, credit positive. Returns "
+                "group, buckets, party_count, total_outstanding, ageing_totals and parties. "
+                "Pass financial_years (e.g. ['2024-25','2025-26']) for a single-click multi-year "
+                "fetch — each aged as of that FY's 31-Mar closing, returned under 'periods'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "financial_years": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "One or more financial years, e.g. ['2024-25','2025-26']. When set, "
+                            "returns ageing per year (aged as of each 31-Mar). Overrides "
+                            "from_date/to_date."
+                        ),
+                    },
+                    "from_date": {
+                        "type": "string",
+                        "description": (
+                            "Optional period start. Accepts DD-MM-YYYY, DD/MM/YYYY, "
+                            "YYYY-MM-DD or YYYYMMDD."
+                        ),
+                        "default": "",
+                    },
+                    "to_date": {
+                        "type": "string",
+                        "description": (
+                            "Optional period end / as-of date. Accepts DD-MM-YYYY, "
+                            "DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD."
+                        ),
+                        "default": "",
+                    },
+                    **TALLY_URL_PROP,
+                },
+                "required": [],
+            },
+        ),
+        types.Tool(
+            name="Sundry_Creditors_Sch-III",
+            description=(
+                "Bill-wise ageing analysis of Sundry Creditors (payables), via the custom "
+                "'MCP Group Ageing' TDL report — Tally itself computes the ageing, matching the "
+                "Group Outstandings age-wise export sign-for-sign. Requires tdl/mcp_group_ageing.txt "
+                "loaded in Tally (F1 > TDL & Add-Ons); if not loaded the tool returns an error "
+                "explaining how. Each party row has a total (net closing) plus buckets: '< 90 days', "
+                "'90 to 180 days', '180 to 365 days', '365 to 1035 days', '> 1035 days', 'On Account' "
+                "(aged by bill date). Credit (Cr) amounts are positive, debit negative. Returns "
+                "group, buckets, party_count, total_outstanding, ageing_totals and parties. "
+                "Pass financial_years (e.g. ['2024-25','2025-26']) for a single-click multi-year "
+                "fetch — each aged as of that FY's 31-Mar closing, returned under 'periods'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "financial_years": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "One or more financial years, e.g. ['2024-25','2025-26']. When set, "
+                            "returns ageing per year (aged as of each 31-Mar). Overrides "
+                            "from_date/to_date."
+                        ),
+                    },
+                    "from_date": {
+                        "type": "string",
+                        "description": (
+                            "Optional period start. Accepts DD-MM-YYYY, DD/MM/YYYY, "
+                            "YYYY-MM-DD or YYYYMMDD."
+                        ),
+                        "default": "",
+                    },
+                    "to_date": {
+                        "type": "string",
+                        "description": (
+                            "Optional period end / as-of date. Accepts DD-MM-YYYY, "
+                            "DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD."
+                        ),
+                        "default": "",
+                    },
+                    **TALLY_URL_PROP,
+                },
+                "required": [],
+            },
+        ),
+        types.Tool(
             name="create_party_ledger",
             description="Create a new party ledger (account) in TallyPrime under a specified group.",
             inputSchema={
@@ -475,6 +612,26 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="get_voucher_by_number",
+            description=(
+                "Fetch a COMPLETE TallyPrime voucher by its voucher number (single parameter). "
+                "Returns the entire raw voucher XML plus a parsed breakdown. "
+                "After calling, summarise for the user: party details (name, GSTIN, state, place of supply), "
+                "all ledger entries (ledger name + amount + Dr/Cr), and all inventory line items "
+                "(item name, quantity, rate, amount), followed by the totals (debit, credit, inventory value). "
+                "Note: voucher numbers may not be unique across voucher types/financial years — "
+                "check matched_count; if more than one matched, mention it and that the summary is for the first match."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "voucher_number": {"type": "string", "description": "The exact voucher/invoice number as it appears in TallyPrime"},
+                    **TALLY_URL_PROP,
+                },
+                "required": ["voucher_number"],
+            },
+        ),
+        types.Tool(
             name="create_sales_voucher",
             description=(
                 "Create a Sales (invoice) voucher in TallyPrime with multiple inventory line items. "
@@ -721,10 +878,38 @@ async def list_tools() -> list[types.Tool]:
         # ── Reports ───────────────────────────────────────────────
         types.Tool(
             name="get_trial_balance",
-            description="Fetch the Trial Balance from TallyPrime using Tally's built-in report engine. Returns an ordered list of account/group entries with closing_dr, closing_cr and optionally opening_dr, opening_cr. Supports date range filtering via from_date/to_date.",
+            description="Fetch the Trial Balance from TallyPrime using Tally's built-in report engine. Returns an ordered list of account/group entries with closing_dr, closing_cr and optionally opening_dr, opening_cr. Supports date range filtering via from_date/to_date. Pass financial_years (e.g. ['2024-25','2025-26']) for a single-click multi-year fetch (one trial balance per year under 'periods').",
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "financial_years": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "One or more financial years, e.g. ['2024-25','2025-26']. When set, returns a trial balance per year under 'periods'. Overrides from_date/to_date.",
+                    },
+                    "from_date": {"type": "string", "description": "Start date in YYYYMMDD format", "default": ""},
+                    "to_date": {"type": "string", "description": "End date in YYYYMMDD format", "default": ""},
+                    "include_opening": {
+                        "type": "boolean",
+                        "description": "Include opening balance columns (opening_dr, opening_cr). Default true. Set false for closing-only view.",
+                        "default": True,
+                    },
+                    **TALLY_URL_PROP,
+                },
+                "required": [],
+            },
+        ),
+        types.Tool(
+            name="trial_balance_Sch-III",
+            description="Fetch the Trial Balance from TallyPrime using Tally's built-in report engine. Returns an ordered list of account/group entries with closing_dr, closing_cr and optionally opening_dr, opening_cr. Supports date range filtering via from_date/to_date. Pass financial_years (e.g. ['2024-25','2025-26']) for a single-click multi-year fetch (one trial balance per year under 'periods').",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "financial_years": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "One or more financial years, e.g. ['2024-25','2025-26']. When set, returns a trial balance per year under 'periods'. Overrides from_date/to_date.",
+                    },
                     "from_date": {"type": "string", "description": "Start date in YYYYMMDD format", "default": ""},
                     "to_date": {"type": "string", "description": "End date in YYYYMMDD format", "default": ""},
                     "include_opening": {
@@ -927,6 +1112,53 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="Stock_Summary_Sch-III",
+            description=(
+                "Schedule III style item-wise Stock Summary (value only), per financial year. "
+                "Returns every stock item with its stock group (parent), opening value and closing "
+                "value, plus grand totals — matching the 'Details of Stock' export (Particulars | "
+                "Stock Group | Opening Balance | Closing Balance). Uses Tally's built-in Stock "
+                "Summary report scoped by date, so any FY is fast. Pass financial_years (e.g. "
+                "['2024-25','2025-26']) for a single-click multi-year fetch (returns one result "
+                "per year under 'periods'); or pass from_date/to_date for a single period; or omit "
+                "all for the current period. Values read positive (assets)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "financial_years": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "One or more financial years, e.g. ['2024-25','2025-26']. When set, "
+                            "returns a stock summary per year in a single call. Overrides "
+                            "from_date/to_date."
+                        ),
+                    },
+                    "from_date": {
+                        "type": "string",
+                        "description": (
+                            "Single-period start (opening value as of this date). Accepts "
+                            "DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD. Ignored if "
+                            "financial_years is set."
+                        ),
+                        "default": "",
+                    },
+                    "to_date": {
+                        "type": "string",
+                        "description": (
+                            "Single-period end (closing value as of this date). Accepts "
+                            "DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD. Ignored if "
+                            "financial_years is set."
+                        ),
+                        "default": "",
+                    },
+                    **TALLY_URL_PROP,
+                },
+                "required": [],
+            },
+        ),
+        types.Tool(
             name="get_daybook",
             description="Fetch the Daybook (all vouchers in chronological order) from TallyPrime for a given date range.",
             inputSchema={
@@ -1052,6 +1284,34 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
             case "get_ledger":
                 return _ok(tc.fetch_ledger(arguments["name"], tally_url=_url(arguments)))
 
+            case "get_ledgers_of_group":
+                return _ok(tc.fetch_ledgers_of_group(
+                    group_name=arguments.get("group_name", "Sundry Debtors"),
+                    from_date=arguments.get("from_date", ""),
+                    to_date=arguments.get("to_date", ""),
+                    tally_url=_url(arguments),
+                ))
+
+            case "Sundry_Debtors_Sch-III":
+                return _ok(tc.fetch_ageing_analysis(
+                    group_name="Sundry Debtors",
+                    from_date=arguments.get("from_date", ""),
+                    to_date=arguments.get("to_date", ""),
+                    financial_years=_parse_array_arg(arguments.get("financial_years"))
+                    if arguments.get("financial_years") else None,
+                    tally_url=_url(arguments),
+                ))
+
+            case "Sundry_Creditors_Sch-III":
+                return _ok(tc.fetch_ageing_analysis(
+                    group_name="Sundry Creditors",
+                    from_date=arguments.get("from_date", ""),
+                    to_date=arguments.get("to_date", ""),
+                    financial_years=_parse_array_arg(arguments.get("financial_years"))
+                    if arguments.get("financial_years") else None,
+                    tally_url=_url(arguments),
+                ))
+
             case "create_party_ledger":
                 return _ok(tc.create_party_ledger(
                     name=arguments["name"],
@@ -1156,6 +1416,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
                     from_date=arguments.get("from_date", ""),
                     to_date=arguments.get("to_date", ""),
                     party_name=arguments.get("party_name", ""),
+                    tally_url=_url(arguments),
+                ))
+
+            case "get_voucher_by_number":
+                return _ok(tc.fetch_voucher_by_number(
+                    voucher_number=arguments["voucher_number"],
                     tally_url=_url(arguments),
                 ))
 
@@ -1270,11 +1536,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
                 ))
 
             # ── Reports ────────────────────────────────────────
-            case "get_trial_balance":
+            case "get_trial_balance" | "trial_balance_Sch-III":
                 return _ok(tc.fetch_trial_balance(
                     from_date=arguments.get("from_date", ""),
                     to_date=arguments.get("to_date", ""),
                     include_opening=bool(arguments.get("include_opening", True)),
+                    financial_years=_parse_array_arg(arguments.get("financial_years"))
+                    if arguments.get("financial_years") else None,
                     tally_url=_url(arguments),
                 ))
 
@@ -1359,6 +1627,15 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
             case "get_stock_summary":
                 return _ok(tc.fetch_stock_summary(tally_url=_url(arguments)))
 
+            case "Stock_Summary_Sch-III":
+                return _ok(tc.fetch_stock_summary_sch3(
+                    from_date=arguments.get("from_date", ""),
+                    to_date=arguments.get("to_date", ""),
+                    financial_years=_parse_array_arg(arguments.get("financial_years"))
+                    if arguments.get("financial_years") else None,
+                    tally_url=_url(arguments),
+                ))
+
             case "get_daybook":
                 return _ok(tc.fetch_daybook(
                     from_date=arguments.get("from_date", ""),
@@ -1397,4 +1674,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    import
+    import asyncio
+    asyncio.run(main())

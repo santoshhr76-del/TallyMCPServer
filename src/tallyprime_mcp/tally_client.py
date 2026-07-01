@@ -28,6 +28,28 @@ def _xe(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
+def _format_company_currency(raw: str | None) -> str:
+    """Map TallyPrime's COMPANY.CURRENCYNAME (often just the symbol like '₹'
+    or an XML entity '&#8377;') into a readable label like 'INR (₹)'.
+
+    Non-Indian symbols pass through untouched so multi-currency setups
+    still display correctly.
+    """
+    if not raw:
+        return "INR (₹)"
+    s = str(raw).strip()
+    # Known Indian rupee representations (raw char, hex/dec entities, common
+    # mojibake variants). Map them all to the canonical "INR (₹)".
+    if s in {"₹", "&#8377;", "&#x20B9;", "&#X20B9;", "Rs", "Rs."}:
+        return "INR (₹)"
+    # If TallyPrime ever returns just the text "INR" (some older versions),
+    # add the symbol for visual clarity.
+    if s.upper() == "INR":
+        return "INR (₹)"
+    # Anything else (USD, EUR, …) is shown verbatim.
+    return s
+
+
 def _parse_date(date_str: str) -> str:
     """Parse a user-supplied date string and return Tally's YYYYMMDD format.
 
@@ -147,9 +169,130 @@ def _rx(xml_str: str, tag: str, default: str = "") -> str:
     return m.group(1).strip() if m else default
 
 
+def _collection_objects(root: ET.Element, tag: str) -> list[ET.Element]:
+    """Return the real <TAG> data objects from a Tally Collection response.
+
+    Every Collection response carries a <CMPINFO> header block whose COUNTER
+    fields reuse object tag names — e.g. <VOUCHER>2</VOUCHER>, <LEDGER>0</LEDGER>,
+    <STOCKITEM>0</STOCKITEM>. A naive root.findall(".//TAG") therefore returns
+    those empty counter elements FIRST, and code that summarises match[0] ends
+    up reading an empty element. Prefer the BODY/DATA/COLLECTION path; if that
+    yields nothing, fall back to elements that have children or attributes
+    (the CMPINFO counters have neither).
+    """
+    objs = root.findall(f".//DATA/COLLECTION/{tag}")
+    if objs:
+        return objs
+    return [el for el in root.findall(f".//{tag}") if len(el) or el.attrib]
+
+
 # ─────────────────────────────────────────────
 # COMPANY / CONNECTION
 # ─────────────────────────────────────────────
+
+def _fetch_company_gstin(tally_url: str | None = None) -> dict[str, str]:
+    """Fetch the company GSTIN from the GST Tax Unit / GST Registration master.
+
+    TallyPrime 2.x+ (the new GST experience) stores the company's GSTIN inside a
+    Tax Unit / GST Registration master created in F11 — NOT in the Company
+    master's <GSTREGISTRATIONNUMBER> field (which comes back blank). We probe the
+    likely collection object types and return the first GSTIN found.
+
+    Only GST tax units are considered — Excise / VAT / Service-tax units are
+    excluded via a server-side `$UsedFor = "GST"` filter, with a TAXTYPE guard
+    as backup. The non-GST "Default Tax Unit" is ignored (it carries no GSTIN).
+
+    Returns {} when nothing is found (e.g. older TallyPrime, where the Company
+    field is authoritative and this lookup isn't needed).
+    """
+    for coll_type in ("TaxUnit", "GSTRegistration", "CMPGSTRegistration"):
+        # Server-side filter: restrict the TaxUnit collection to GST units so
+        # Excise/VAT/other tax-type units never come back. Only applied to the
+        # TaxUnit type (the other fallback types don't expose $UsedFor).
+        if coll_type == "TaxUnit":
+            filter_xml = "<FILTER>MCPGSTOnly</FILTER>"
+            system_xml = '<SYSTEM TYPE="Formulae" NAME="MCPGSTOnly">$UsedFor = "GST"</SYSTEM>'
+        else:
+            filter_xml = ""
+            system_xml = ""
+        xml = f"""<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>MCPCmpGSTReg</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="MCPCmpGSTReg" ISMODIFY="No">
+            <TYPE>{coll_type}</TYPE>
+            <FETCH>Name,GSTRegNumber,TaxRegistration,UsedFor,TaxType,GSTIN,
+                   GSTRegistrationNumber,GSTRegistrationType,
+                   StateName,State,ApplicableFrom</FETCH>
+            {filter_xml}
+          </COLLECTION>
+          {system_xml}
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>"""
+        try:
+            raw = _post_xml(xml, tally_url)
+        except Exception:
+            continue
+
+        # Parse element-by-element and return the FIRST GST unit that carries a
+        # GSTIN, so the name/state we report belong to that same unit (a flat
+        # regex over the whole response would mis-attribute them). TallyPrime
+        # stores the GSTIN in <GSTREGNUMBER> and in the <TAXUNIT> element's
+        # TAXREGISTRATION attribute; older builds use <GSTIN>.
+        try:
+            root = _parse_xml(raw)
+        except Exception:
+            root = None
+
+        if root is not None:
+            for tu in _collection_objects(root, "TAXUNIT"):
+                # Backup guard (in case the server filter is unsupported): never
+                # treat a non-GST unit's registration number as the GSTIN.
+                tax_type = (tu.get("TAXTYPE") or "").strip().upper()
+                used_for = _find_text(tu, "USEDFOR").strip().upper()
+                if tax_type and tax_type != "GST":
+                    continue
+                if used_for and used_for != "GST":
+                    continue
+                gstin = (
+                    _find_text(tu, "GSTREGNUMBER")
+                    or (tu.get("TAXREGISTRATION") or "").strip()
+                    or _find_text(tu, "GSTIN")
+                    or _find_text(tu, "GSTREGISTRATIONNUMBER")
+                )
+                if gstin:
+                    return {
+                        "gstin":                 gstin,
+                        "gst_registration_type": _find_text(tu, "GSTREGISTRATIONTYPE"),
+                        "tax_unit":              tu.get("NAME") or _find_text(tu, "NAME"),
+                        "state":                 _find_text(tu, "STATENAME"),
+                    }
+
+        # Fallback for collection types that don't wrap results in <TAXUNIT>
+        # (single-registration companies, alternate object types).
+        gstin = _rx(raw, "GSTREGNUMBER") or _rx(raw, "GSTIN") or _rx(raw, "GSTREGISTRATIONNUMBER")
+        if gstin:
+            return {
+                "gstin":                 gstin,
+                "gst_registration_type": _rx(raw, "GSTREGISTRATIONTYPE"),
+                "tax_unit":              _rx(raw, "TAXUNIT@NAME") or _rx(raw, "NAME"),
+                "state":                 _rx(raw, "STATENAME"),
+            }
+    return {}
+
 
 def get_active_company(tally_url: str | None = None) -> dict[str, Any]:
     """
@@ -158,8 +301,9 @@ def get_active_company(tally_url: str | None = None) -> dict[str, Any]:
     Uses a Collection request (the only type guaranteed to work on all
     TallyPrime versions via the Gateway XML API).
 
-    Also returns _raw_xml so you can inspect TallyPrime's exact response
-    if any fields come back empty — pass that XML to debug_raw_xml to diagnose.
+    The company GSTIN is taken DIRECTLY from the GST Tax Unit master (F11) via
+    _fetch_company_gstin(); the Company master's own GST field is not consulted.
+    The non-GST "Default Tax Unit" is ignored (it carries no GSTIN).
     """
     xml = """<ENVELOPE>
   <HEADER>
@@ -178,8 +322,8 @@ def get_active_company(tally_url: str | None = None) -> dict[str, Any]:
           <COLLECTION NAME="MCPCompanyList" ISMODIFY="No">
             <TYPE>Company</TYPE>
             <FETCH>Name,StartingFrom,EndingAt,CurrencyName,
-                   GSTRegistrationNumber,StateName,CountryName,
-                   PhoneNumber,Email,Address,BooksFrom,IsSimpleGSTEnabled</FETCH>
+                   StateName,CountryName,PhoneNumber,MobileNo,
+                   Email,Website,Address,BooksFrom,IsSimpleGSTEnabled</FETCH>
           </COLLECTION>
         </TDLMESSAGE>
       </TDL>
@@ -196,18 +340,36 @@ def get_active_company(tally_url: str | None = None) -> dict[str, Any]:
             "tally_url": _resolve_url(tally_url),
         }
 
+    # GSTIN is read DIRECTLY from the GST Tax Unit master (F11) — the Company
+    # master's GSTREGISTRATIONNUMBER field is intentionally not used (blank in
+    # TallyPrime 2.x+). The non-GST "Default Tax Unit" is ignored.
+    reg = _fetch_company_gstin(tally_url)
+    gstin                 = reg.get("gstin", "")
+    gst_registration_type = reg.get("gst_registration_type", "")
+    tax_unit              = reg.get("tax_unit", "")
+
     return {
         # NAME appears both as attribute <COMPANY NAME="..."> and child <NAME>...</NAME>
         "name":          _rx(raw, "COMPANY@NAME") or _rx(raw, "NAME"),
         "starting_from": _rx(raw, "STARTINGFROM"),
         "ending_at":     _rx(raw, "ENDINGAT"),
-        "currency":      _rx(raw, "CURRENCYNAME"),
+        # TallyPrime's COMPANY.CURRENCYNAME field actually returns the *name
+        # attribute* of the currency master — for Indian Tally this is "₹"
+        # (the symbol), not the text "INR". The text "INR" lives in the
+        # Currency master's <MAILINGNAME>. We don't want to round-trip a
+        # second XML fetch just for a label, so we translate the common
+        # known cases here. Other (non-Indian) currencies pass through as-is.
+        "currency":      _format_company_currency(_rx(raw, "CURRENCYNAME")),
         "books_from":    _rx(raw, "BOOKSFROM"),
-        "gstin":         _rx(raw, "GSTREGISTRATIONNUMBER"),
+        "gstin":         gstin,
+        "gst_registration_type": gst_registration_type,
+        "tax_unit":      tax_unit,
         "state":         _rx(raw, "STATENAME"),
         "country":       _rx(raw, "COUNTRYNAME"),
         "phone":         _rx(raw, "PHONENUMBER"),
+        "mobile":        _rx(raw, "MOBILENO"),
         "email":         _rx(raw, "EMAIL"),
+        "website":       _rx(raw, "WEBSITE"),
         "address":       _rx(raw, "ADDRESS"),
         "tally_url":     _resolve_url(tally_url),
     }
@@ -230,6 +392,84 @@ def debug_raw_xml(request_xml: str, tally_url: str | None = None) -> dict[str, A
 # ─────────────────────────────────────────────
 # LEDGERS & GROUPS
 # ─────────────────────────────────────────────
+
+def fetch_ledgers_of_group(
+    group_name: str = "Sundry Debtors",
+    from_date: str = "",
+    to_date: str = "",
+    tally_url: str | None = None,
+) -> dict[str, Any]:
+    """List every ledger under a Tally group with its opening/closing balance.
+
+    Uses a Collection request with <CHILDOF> + <BELONGSTO>Yes</BELONGSTO>, which
+    returns all ledgers belonging to the group *including nested sub-groups*
+    (e.g. parties filed under a sub-group of 'Sundry Debtors'), rather than only
+    those whose immediate Parent equals the group name.
+
+    Optional from_date / to_date set the reporting period via SVFROMDATE /
+    SVTODATE, so ClosingBalance is computed as of to_date and OpeningBalance as
+    of from_date — the same figures Tally shows on the group screen for that
+    period. Dates accept DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD.
+
+    Sign convention follows Tally: debit balances are negative, credit positive
+    (so Sundry Debtors parties are normally negative, Sundry Creditors positive).
+    """
+    date_vars = ""
+    norm_from = _parse_date(from_date) if from_date else ""
+    norm_to = _parse_date(to_date) if to_date else ""
+    if norm_from:
+        date_vars += f"        <SVFROMDATE>{norm_from}</SVFROMDATE>\n"
+    if norm_to:
+        date_vars += f"        <SVTODATE>{norm_to}</SVTODATE>\n"
+
+    safe_group = group_name.replace("&", "&amp;").replace('"', "&quot;")
+
+    xml = f"""<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>MCPLedgersOfGroup</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+{date_vars}        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="MCPLedgersOfGroup" ISMODIFY="No">
+            <TYPE>Ledger</TYPE>
+            <CHILDOF>{safe_group}</CHILDOF>
+            <BELONGSTO>Yes</BELONGSTO>
+            <FETCH>Name,Parent,ClosingBalance,OpeningBalance</FETCH>
+          </COLLECTION>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>"""
+
+    root = _parse_xml(_post_xml(xml, tally_url, timeout=120.0))
+
+    ledgers = [
+        {
+            "name": led.get("NAME") or _find_text(led, "NAME"),
+            "parent": _find_text(led, "PARENT"),
+            "opening_balance": _find_text(led, "OPENINGBALANCE"),
+            "closing_balance": _find_text(led, "CLOSINGBALANCE"),
+        }
+        for led in _collection_objects(root, "LEDGER")
+    ]
+
+    return {
+        "group": group_name,
+        "from_date": norm_from,
+        "to_date": norm_to,
+        "ledger_count": len(ledgers),
+        "ledgers": ledgers,
+    }
+
 
 def fetch_all_ledgers(tally_url: str | None = None) -> list[dict[str, Any]]:
     """Fetch all ledgers from TallyPrime.
@@ -269,7 +509,7 @@ def fetch_all_ledgers(tally_url: str | None = None) -> list[dict[str, Any]]:
             "master_id": ledger.get("MASTERID", ""),
             "is_revenue": _find_text(ledger, "ISREVENUE"),
         }
-        for ledger in root.findall(".//LEDGER")
+        for ledger in _collection_objects(root, "LEDGER")
     ]
 
 
@@ -312,7 +552,8 @@ def fetch_ledger(name: str, tally_url: str | None = None) -> dict[str, Any]:
 </ENVELOPE>"""
     raw = _post_xml(xml, tally_url)
     root = _parse_xml(raw)
-    ledger = root.find(".//LEDGER")
+    _ledgers = _collection_objects(root, "LEDGER")
+    ledger = _ledgers[0] if _ledgers else None
     if ledger is None:
         return {"error": f"Ledger '{name}' not found", "tally_url": _resolve_url(tally_url)}
 
@@ -1387,7 +1628,7 @@ def fetch_all_groups(tally_url: str | None = None) -> list[dict[str, Any]]:
             "is_revenue": _find_text(g, "ISREVENUE"),
             "is_addable": _find_text(g, "ISADDABLE"),
         }
-        for g in root.findall(".//GROUP")
+        for g in _collection_objects(root, "GROUP")
     ]
 
 
@@ -1480,8 +1721,145 @@ def fetch_vouchers(
             "amount": _pos(_find_text(v, "AMOUNT")),
             "total_amount": _pos(_find_text(v, "TOTALAMOUNT")),
         }
-        for v in root.findall(".//VOUCHER")
+        for v in _collection_objects(root, "VOUCHER")
     ]
+
+
+def fetch_voucher_by_number(voucher_number: str, tally_url: str | None = None) -> dict[str, Any]:
+    """Fetch the COMPLETE voucher object for a given voucher number.
+
+    Returns the full raw voucher XML plus a parsed summary covering:
+      • voucher header (number, date, type, reference, narration)
+      • party details (name, GSTIN, state, place of supply, reg. type)
+      • ledger entries (ledger name, amount, Dr/Cr)
+      • inventory items (item, quantity, rate, amount)
+      • rolled-up totals (debit, credit, inventory value)
+
+    Note: voucher numbers are not guaranteed unique across voucher types or
+    financial years, so `matched_count` reports how many vouchers matched;
+    the structured summary describes the FIRST match while `raw_xml` contains
+    every match returned by TallyPrime.
+
+    The request sets SVFROMDATE/SVTODATE to a wide range (2000–2099) because a
+    Voucher collection WITHOUT an explicit date range only covers Tally's
+    current period — which silently returns no results for older vouchers.
+    Matching is exact on the stored voucher number string (e.g. 'INV-001').
+    """
+    safe_num = str(voucher_number).replace("&", "&amp;").replace('"', "&quot;")
+    xml = f"""<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>MCPVoucherByNumber</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        <SVFROMDATE>20000401</SVFROMDATE>
+        <SVTODATE>20991231</SVTODATE>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="MCPVoucherByNumber" ISMODIFY="No">
+            <TYPE>Voucher</TYPE>
+            <FETCH>Date,VoucherNumber,VoucherTypeName,Reference,ReferenceDate,
+                   Narration,PartyLedgerName,PartyName,PartyGSTIN,
+                   GSTRegistrationType,PlaceOfSupply,StateName,CountryOfResidence,
+                   Amount,LedgerEntries,AllLedgerEntries,
+                   InventoryEntries,AllInventoryEntries</FETCH>
+            <FILTER>MCPVchNumFilter</FILTER>
+          </COLLECTION>
+          <SYSTEM TYPE="Formulae" NAME="MCPVchNumFilter">$VoucherNumber = "{safe_num}"</SYSTEM>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
+</ENVELOPE>"""
+    raw = _post_xml(xml, tally_url)
+    root = _parse_xml(raw)
+    vouchers = _collection_objects(root, "VOUCHER")
+    if not vouchers:
+        return {
+            "error": f"No voucher found with number '{voucher_number}'",
+            "tally_url": _resolve_url(tally_url),
+            "raw_xml": raw,
+        }
+
+    voucher = vouchers[0]   # summarise the first match
+
+    def _amt(val: str) -> float:
+        try:
+            return float(val) if val not in ("", None) else 0.0
+        except ValueError:
+            return 0.0
+
+    # ── Party / header ────────────────────────────────────────────────────────
+    party = {
+        "name":              _find_text(voucher, "PARTYLEDGERNAME") or _find_text(voucher, "PARTYNAME"),
+        "gstin":             _find_text(voucher, "PARTYGSTIN"),
+        "state":             _find_text(voucher, "STATENAME"),
+        "place_of_supply":   _find_text(voucher, "PLACEOFSUPPLY"),
+        "registration_type": _find_text(voucher, "GSTREGISTRATIONTYPE"),
+    }
+
+    # ── Ledger entries (prefer ALLLEDGERENTRIES, fall back to LEDGERENTRIES) ───
+    led_lists = voucher.findall("ALLLEDGERENTRIES.LIST") or voucher.findall("LEDGERENTRIES.LIST")
+    ledger_entries: list[dict[str, Any]] = []
+    tot_dr = tot_cr = 0.0
+    for le in led_lists:
+        lname = _find_text(le, "LEDGERNAME")
+        if not lname:
+            continue
+        amt = abs(_amt(_find_text(le, "AMOUNT")))
+        # ISDEEMEDPOSITIVE=Yes => debit side; No => credit side.
+        is_dr = _find_text(le, "ISDEEMEDPOSITIVE").strip().lower() == "yes"
+        ledger_entries.append({"ledger": lname, "amount": round(amt, 2), "dr_cr": "Dr" if is_dr else "Cr"})
+        if is_dr:
+            tot_dr += amt
+        else:
+            tot_cr += amt
+
+    # ── Inventory items (prefer ALLINVENTORYENTRIES, fall back to INVENTORYENTRIES) ─
+    inv_lists = voucher.findall("ALLINVENTORYENTRIES.LIST") or voucher.findall("INVENTORYENTRIES.LIST")
+    inventory_items: list[dict[str, Any]] = []
+    tot_inv = 0.0
+    for ie in inv_lists:
+        iname = _find_text(ie, "STOCKITEMNAME")
+        if not iname:
+            continue
+        amt = abs(_amt(_find_text(ie, "AMOUNT")))
+        # The sales/purchase ledger for this line lives in ACCOUNTINGALLOCATIONS.LIST.
+        line_ledger = _find_text(ie, "ACCOUNTINGALLOCATIONS.LIST/LEDGERNAME")
+        inventory_items.append({
+            "item":       iname,
+            "quantity":   (_find_text(ie, "BILLEDQTY") or _find_text(ie, "ACTUALQTY")).strip(),
+            "rate":       _find_text(ie, "RATE").strip(),
+            "amount":     round(amt, 2),
+            "ledger":     line_ledger,
+            "hsn":        _find_text(ie, "GSTHSNNAME") or _find_text(ie, "HSNCODE"),
+        })
+        tot_inv += amt
+
+    return {
+        "voucher_number": _find_text(voucher, "VOUCHERNUMBER"),
+        "date":           _find_text(voucher, "DATE"),
+        "voucher_type":   _find_text(voucher, "VOUCHERTYPENAME"),
+        "reference":      _find_text(voucher, "REFERENCE"),
+        "narration":      _find_text(voucher, "NARRATION"),
+        "party":          party,
+        "ledger_entries": ledger_entries,
+        "inventory_items": inventory_items,
+        "totals": {
+            "ledger_debit":    round(tot_dr, 2),
+            "ledger_credit":   round(tot_cr, 2),
+            "inventory_value": round(tot_inv, 2),
+        },
+        "matched_count":  len(vouchers),
+        "raw_xml":        raw,
+        "tally_url":      _resolve_url(tally_url),
+    }
 
 
 def _post_voucher(voucher_xml: str, tally_url: str | None = None) -> dict[str, Any]:
@@ -2757,41 +3135,24 @@ def create_journal_voucher(
 # REPORTS
 # ─────────────────────────────────────────────
 
-def fetch_trial_balance(
-    from_date: str = "",
-    to_date: str = "",
-    include_opening: bool = True,
-    tally_url: str | None = None,
+def _trial_balance_for_period(
+    from8: str,
+    to8: str,
+    include_opening: bool,
+    tally_url: str | None,
 ) -> list[dict[str, Any]]:
-    """Fetch trial balance using Tally's built-in Trial Balance report.
-
-    Uses TYPE=Data with ID='Trial Balance' which triggers Tally's own report
-    computation engine — the same engine used when you export Trial Balance
-    from Tally's UI (File > Export > XML). This reliably handles any date
-    range without the hanging issues caused by custom TDL Ledger collection
-    period-balance computation (which forces Tally to recompute all vouchers
-    on-the-fly and can hang indefinitely).
-
-    Response mirrors the actual TrialBal XML structure (DSP* display format):
-      DSPOPDRAMTA → Opening Debit amount
-      DSPOPCRAMTA → Opening Credit amount
-      DSPCLDRAMTA → Closing Debit amount
-      DSPCLCRAMTA → Closing Credit amount
-
-    Both group-level and ledger-level rows are returned in document order,
-    matching Tally's on-screen Trial Balance hierarchy.
-
-    Args:
-        include_opening: When True (default) returns opening_dr/opening_cr columns.
-                         When False only closing_dr/closing_cr are returned,
-                         matching Tally's "without opening balance" view.
-    """
+    """Trial balance for a single period (from8/to8 already YYYYMMDD or '')."""
     date_vars = ""
-    if from_date:
-        date_vars += f"        <SVFROMDATE>{from_date}</SVFROMDATE>\n"
-    if to_date:
-        date_vars += f"        <SVTODATE>{to_date}</SVTODATE>\n"
+    if from8:
+        date_vars += f"        <SVFROMDATE>{from8}</SVFROMDATE>\n"
+    if to8:
+        date_vars += f"        <SVTODATE>{to8}</SVTODATE>\n"
 
+    # EXPLODEFLAG=Yes renders the report in "Detailed" format with all levels
+    # expanded — drilling every primary group down through its sub-groups
+    # (e.g. Capital Account -> Share Capital, Reserves & Surplus) instead of
+    # returning only the collapsed top-level groups. Mirrors the on-screen config
+    # "Format of Report: Detailed / Expand all levels in Detailed format: Yes".
     xml = f"""<ENVELOPE>
   <HEADER>
     <VERSION>1</VERSION>
@@ -2802,7 +3163,8 @@ def fetch_trial_balance(
   <BODY>
     <DESC>
       <STATICVARIABLES>
-{date_vars}        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+{date_vars}        <EXPLODEFLAG>Yes</EXPLODEFLAG>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
       </STATICVARIABLES>
     </DESC>
   </BODY>
@@ -2833,6 +3195,56 @@ def fetch_trial_balance(
             result.append(entry)
         i += 1
     return result
+
+
+def fetch_trial_balance(
+    from_date: str = "",
+    to_date: str = "",
+    include_opening: bool = True,
+    financial_years: list[str] | None = None,
+    tally_url: str | None = None,
+) -> Any:
+    """Fetch trial balance using Tally's built-in Trial Balance report.
+
+    Uses TYPE=Data with ID='Trial Balance' which triggers Tally's own report
+    computation engine — the same engine used when you export Trial Balance
+    from Tally's UI. Handles any date range without the hang caused by custom
+    TDL period-balance computation.
+
+    Response mirrors the actual TrialBal XML structure (DSP* display format):
+      DSPOPDRAMTA / DSPOPCRAMTA → Opening Debit / Credit
+      DSPCLDRAMTA / DSPCLCRAMTA → Closing Debit / Credit
+    Both group-level and ledger-level rows are returned in document order.
+
+    - financial_years: list like ["2024-25", "2025-26"] for a single-click
+      multi-year fetch. Returns {"periods": [{financial_year, from_date,
+      to_date, entry_count, entries:[...]}, ...]}.
+    - Otherwise pass from_date/to_date (YYYYMMDD) for a single period; the
+      result is the flat entries list (backward compatible).
+
+    Args:
+        include_opening: When True (default) returns opening_dr/opening_cr too;
+                         when False only closing_dr/closing_cr.
+    """
+    if financial_years:
+        periods = []
+        for fy in financial_years:
+            f8, t8 = _fy_to_period(str(fy))
+            entries = _trial_balance_for_period(f8, t8, include_opening, tally_url)
+            periods.append({
+                "financial_year": str(fy),
+                "from_date":       f8,
+                "to_date":         t8,
+                "entry_count":     len(entries),
+                "entries":         entries,
+            })
+        return {
+            "financial_years": [str(fy) for fy in financial_years],
+            "period_count":    len(periods),
+            "periods":         periods,
+        }
+
+    return _trial_balance_for_period(from_date, to_date, include_opening, tally_url)
 
 
 def fetch_daybook(from_date: str = "", to_date: str = "", tally_url: str | None = None) -> list[dict[str, Any]]:
@@ -3077,7 +3489,8 @@ def get_unit(
     raw = _post_xml(xml, tally_url)
     root = _parse_xml(raw)
 
-    unit = root.find(".//UNIT")
+    _units = _collection_objects(root, "UNIT")
+    unit = _units[0] if _units else None
     if unit is None:
         return {"error": f"Unit '{name}' not found in TallyPrime."}
 
@@ -3126,7 +3539,7 @@ def get_all_units(
     root = _parse_xml(raw)
 
     units = []
-    for unit in root.findall(".//UNIT"):
+    for unit in _collection_objects(root, "UNIT"):
         units.append({
             "name": unit.get("NAME") or _find_text(unit, "NAME"),
             "original_name": _find_text(unit, "ORIGINALNAME"),
@@ -3241,7 +3654,7 @@ def get_all_stock_groups(
     root = _parse_xml(raw)
 
     groups = []
-    for group in root.findall(".//STOCKGROUP"):
+    for group in _collection_objects(root, "STOCKGROUP"):
         groups.append({
             "name": group.get("NAME") or _find_text(group, "NAME"),
             "parent": _find_text(group, "PARENT"),
@@ -3286,7 +3699,8 @@ def get_stock_group(
     raw = _post_xml(xml, tally_url)
     root = _parse_xml(raw)
 
-    group = root.find(".//STOCKGROUP")
+    _groups = _collection_objects(root, "STOCKGROUP")
+    group = _groups[0] if _groups else None
     if group is None:
         return {"error": f"Stock group '{name}' not found in TallyPrime."}
 
@@ -3405,7 +3819,7 @@ def get_stock_items_of_group(
     root = _parse_xml(raw)
 
     items = []
-    for item in root.findall(".//STOCKITEM"):
+    for item in _collection_objects(root, "STOCKITEM"):
         items.append({
             "name": item.get("NAME") or _find_text(item, "NAME"),
             "parent": _find_text(item, "PARENT"),
@@ -3446,7 +3860,7 @@ def get_all_stock_items(
     root = _parse_xml(raw)
 
     items = []
-    for item in root.findall(".//STOCKITEM"):
+    for item in _collection_objects(root, "STOCKITEM"):
         items.append({
             "name": item.get("NAME") or _find_text(item, "NAME"),
             "parent": _find_text(item, "PARENT"),
@@ -3460,46 +3874,59 @@ def get_stock_item(
 ) -> dict[str, Any]:
     """Fetch details of a specific Stock Item from TallyPrime by name.
 
-    Uses <TYPE>Object</TYPE> + <SUBTYPE>Stock Item</SUBTYPE> export request.
+    Uses a Collection request with a TDL name-filter — the same reliable
+    pattern used by fetch_ledger. (The earlier <TYPE>Object</TYPE> approach is
+    not supported by the TallyPrime XML Gateway and frequently returns
+    "not found" even when the item exists.)
 
     Args:
         name:      Exact stock item name as it appears in TallyPrime
         tally_url: Optional TallyPrime Gateway URL override
     """
+    safe_name = name.replace("&", "&amp;").replace('"', "&quot;")
     xml = f"""<ENVELOPE>
-    <HEADER>
-        <VERSION>1</VERSION>
-        <TALLYREQUEST>Export</TALLYREQUEST>
-        <TYPE>Object</TYPE>
-        <SUBTYPE>Stock Item</SUBTYPE>
-        <ID TYPE="Name">{_xe(name)}</ID>
-    </HEADER>
-    <BODY>
-        <DESC>
-            <STATICVARIABLES>
-                <SVEXPORTFORMAT>XML</SVEXPORTFORMAT>
-            </STATICVARIABLES>
-            <FETCHLIST>
-                <FETCH>Name</FETCH>
-                <FETCH>Parent</FETCH>
-                <FETCH>BaseUnits</FETCH>
-                <FETCH>Closing Balance</FETCH>
-            </FETCHLIST>
-        </DESC>
-    </BODY>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>MCPStockItemDetail</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="MCPStockItemDetail" ISMODIFY="No">
+            <TYPE>StockItem</TYPE>
+            <FETCH>Name,Parent,BaseUnits,ClosingBalance,ClosingValue</FETCH>
+            <FILTER>MCPStockItemByName</FILTER>
+          </COLLECTION>
+          <SYSTEM TYPE="Formulae" NAME="MCPStockItemByName">$Name = "{safe_name}"</SYSTEM>
+        </TDLMESSAGE>
+      </TDL>
+    </DESC>
+  </BODY>
 </ENVELOPE>"""
     raw = _post_xml(xml, tally_url)
     root = _parse_xml(raw)
 
-    item = root.find(".//STOCKITEM")
+    _items = _collection_objects(root, "STOCKITEM")
+    item = _items[0] if _items else None
     if item is None:
-        return {"error": f"Stock item '{name}' not found in TallyPrime."}
+        return {
+            "error": f"Stock item '{name}' not found in TallyPrime.",
+            "tally_url": _resolve_url(tally_url),
+        }
 
     return {
-        "name": item.get("NAME") or _find_text(item, "NAME"),
-        "parent": _find_text(item, "PARENT"),
-        "base_units": _find_text(item, "BASEUNITS"),
-        "closing_balance": _find_text(item, "CLOSINGBALANCE"),
+        "name":            item.get("NAME") or _find_text(item, "NAME")  or _rx(raw, "NAME"),
+        "parent":          _find_text(item, "PARENT")          or _rx(raw, "PARENT"),
+        "base_units":      _find_text(item, "BASEUNITS")       or _rx(raw, "BASEUNITS"),
+        "closing_balance": _find_text(item, "CLOSINGBALANCE")  or _rx(raw, "CLOSINGBALANCE"),
+        "closing_value":   _find_text(item, "CLOSINGVALUE")    or _rx(raw, "CLOSINGVALUE"),
+        "tally_url":       _resolve_url(tally_url),
     }
 
 
@@ -3601,8 +4028,178 @@ def fetch_stock_summary(tally_url: str | None = None) -> list[dict[str, Any]]:
             "standard_cost": _find_text(item, "STANDARDCOST"),
             "standard_price": _find_text(item, "STANDARDSELLINGPRICE"),
         }
-        for item in root.findall(".//STOCKITEM")
+        for item in _collection_objects(root, "STOCKITEM")
     ]
+
+
+def _stock_value_num(s: str) -> float:
+    """Parse a Tally stock value (Indian commas, optional Dr/Cr) into a float."""
+    s = (s or "").strip().replace(",", "")
+    if not s or s == "-":
+        return 0.0
+    neg = s.endswith("Cr")           # Cr stock value (rare) -> negative
+    s = s.replace("Dr", "").replace("Cr", "").strip()
+    try:
+        v = float(s)
+    except ValueError:
+        return 0.0
+    return -v if neg else v
+
+
+def _fy_to_period(fy: str) -> tuple[str, str]:
+    """Convert a financial-year label to (from_yyyymmdd, to_yyyymmdd).
+
+    Accepts '2024-25', '2024-2025', '2024/25', 'FY2024-25', or '2024'
+    (April 1 of the year to March 31 of the next).
+    """
+    yrs = re.findall(r"\d{4}", fy) + re.findall(r"(?<!\d)\d{2}(?!\d)", fy)
+    m = re.search(r"(\d{4})\D+(\d{2,4})", fy)
+    if m:
+        y1 = int(m.group(1))
+        end = m.group(2)
+        y2 = int(end) if len(end) == 4 else (y1 // 100) * 100 + int(end)
+        if y2 <= y1:
+            y2 = y1 + 1
+    else:
+        m2 = re.search(r"(\d{4})", fy)
+        if not m2:
+            raise ValueError(f"Unrecognised financial year: {fy!r}")
+        y1 = int(m2.group(1))
+        y2 = y1 + 1
+    return f"{y1}0401", f"{y2}0331"
+
+
+def _fetch_stock_masters(tally_url: str | None) -> tuple[dict[str, str], list[str]]:
+    """Item -> stock group map (masters only; instant, no valuation)."""
+    coll_xml = """<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE><ID>MCP Stock Items</ID></HEADER>
+  <BODY><DESC>
+    <STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES>
+    <TDL><TDLMESSAGE>
+      <COLLECTION NAME="MCP Stock Items" ISMODIFY="No">
+        <TYPE>Stock Item</TYPE><FETCH>Name,Parent</FETCH>
+      </COLLECTION>
+    </TDLMESSAGE></TDL>
+  </DESC></BODY>
+</ENVELOPE>"""
+    root = _parse_xml(_post_xml(coll_xml, tally_url, timeout=60.0))
+    item_group: dict[str, str] = {}
+    order: list[str] = []
+    for it in _collection_objects(root, "STOCKITEM"):
+        nm = (it.get("NAME") or _find_text(it, "NAME")).strip()
+        if nm and nm not in item_group:
+            item_group[nm] = _find_text(it, "PARENT")
+            order.append(nm)
+    return item_group, order
+
+
+def _stock_summary_for_period(
+    item_group: dict[str, str],
+    order: list[str],
+    from8: str,
+    to8: str,
+    tally_url: str | None,
+) -> dict[str, Any]:
+    """Item-wise opening/closing stock value for one period via the built-in
+    Stock Summary report (batch valuation — fast, no per-item hang)."""
+    date_vars = ""
+    if from8:
+        date_vars += f"    <SVFROMDATE>{from8}</SVFROMDATE>\n"
+    if to8:
+        date_vars += f"    <SVTODATE>{to8}</SVTODATE>\n"
+
+    rep_xml = f"""<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Data</TYPE><ID>Stock Summary</ID></HEADER>
+  <BODY><DESC><STATICVARIABLES>
+{date_vars}    <DSPSHOWOPENING>Yes</DSPSHOWOPENING>
+    <EXPLODEFLAG>Yes</EXPLODEFLAG>
+    <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+  </STATICVARIABLES></DESC></BODY>
+</ENVELOPE>"""
+    root = _parse_xml(_post_xml(rep_xml, tally_url, timeout=120.0))
+
+    op_val: dict[str, float] = {}
+    cl_val: dict[str, float] = {}
+    kids = list(root)
+    for i, ch in enumerate(kids):
+        if ch.tag != "DSPACCNAME":
+            continue
+        name = (ch.findtext("DSPDISPNAME") or "").strip()
+        if name not in item_group:
+            continue   # group sub-total row — skip
+        info = kids[i + 1] if i + 1 < len(kids) and kids[i + 1].tag == "DSPSTKINFO" else None
+        if info is None:
+            continue
+        # report values are Dr-negative; flip so assets read positive (like Excel)
+        op_val[name] = -_stock_value_num(info.findtext("DSPSTKOP/DSPOPAMTA") or "")
+        cl_val[name] = -_stock_value_num(info.findtext("DSPSTKCL/DSPCLAMTA") or "")
+
+    items: list[dict[str, Any]] = []
+    total_open = 0.0
+    total_close = 0.0
+    for nm in order:
+        o = round(op_val.get(nm, 0.0), 2)
+        c = round(cl_val.get(nm, 0.0), 2)
+        items.append({
+            "stock_item":    nm,
+            "stock_group":   item_group[nm],
+            "opening_value": o,
+            "closing_value": c,
+        })
+        total_open += o
+        total_close += c
+
+    return {
+        "from_date":           from8,
+        "to_date":             to8,
+        "item_count":          len(items),
+        "total_opening_value": round(total_open, 2),
+        "total_closing_value": round(total_close, 2),
+        "items":               items,
+    }
+
+
+def fetch_stock_summary_sch3(
+    from_date: str = "",
+    to_date: str = "",
+    financial_years: list[str] | None = None,
+    tally_url: str | None = None,
+) -> dict[str, Any]:
+    """Schedule III style item-wise Stock Summary (value only), per financial year.
+
+    Returns every stock item with its stock group (parent), opening value and
+    closing value, plus grand totals — matching the 'Details of Stock' export
+    (Particulars | Stock Group | Opening Balance | Closing Balance).
+
+    Uses Tally's built-in Stock Summary report (batch valuation) scoped by
+    SVFROMDATE/SVTODATE — fast for any financial year, no per-item hang. Values
+    are sign-flipped to the report convention (assets positive).
+
+    - financial_years: list like ["2024-25", "2025-26"] for a single-click
+      multi-year fetch. Returns {"periods": [<one result per FY>, ...]}.
+    - Otherwise pass from_date/to_date for a single period (DD-MM-YYYY,
+      DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD); omit both for the current period.
+    """
+    item_group, order = _fetch_stock_masters(tally_url)
+
+    if financial_years:
+        periods = []
+        for fy in financial_years:
+            f8, t8 = _fy_to_period(str(fy))
+            res = _stock_summary_for_period(item_group, order, f8, t8, tally_url)
+            res = {"financial_year": str(fy), **res}
+            periods.append(res)
+        return {
+            "financial_years": [str(fy) for fy in financial_years],
+            "period_count":    len(periods),
+            "periods":         periods,
+        }
+
+    from8 = _parse_date(from_date) if from_date else ""
+    to8   = _parse_date(to_date) if to_date else ""
+    return _stock_summary_for_period(item_group, order, from8, to8, tally_url)
 
 
 # ─────────────────────────────────────────────
@@ -4139,6 +4736,7 @@ def fetch_outstanding_receivables(
     party_name: str = "",
     ledger_group: str = "Sundry Debtors",
     tally_url: str | None = None,
+    bill_kind: str = "receivable",
 ) -> dict[str, Any]:
     """Fetch Ledger-wise Bill-wise Outstanding Receivables from TallyPrime.
 
@@ -4190,20 +4788,30 @@ def fetch_outstanding_receivables(
     # report.  Different installations / versions register it under different names.
     # We try each one in order and use the first response that does NOT contain a
     # LINEERROR (i.e. Tally found the report).
-    _REPORT_ID_CANDIDATES = [
-        # User's saved F12 view with "Show Opening Amount" — try all likely name variants
-        "Bills Receivable - My View",       # dash with spaces
-        "Bills Receivable-My View",         # dash without spaces
-        "My View",                          # just the view name
-        "Bills Receivable : My View",       # colon separator
-        "Bills ReceivableBills Receivable - My View",  # TallyPrime breadcrumb-style name
-        # Standard report fallbacks (BILLOP absent without F12 view)
-        "Bills Receivable",                 # confirmed working ID (user-verified)
-        "Bills Outstanding",                # Tally UI display name
-        "Receivables",                      # alternate internal name in some builds
-        "Outstanding Receivables",          # older Tally/ERP9 name
-        "Outstandings",                     # catch-all fallback
-    ]
+    if bill_kind == "payable":
+        # Payables (Sundry Creditors) — Bills Payable report family
+        _REPORT_ID_CANDIDATES = [
+            "Bills Payable",                # standard payables report ID
+            "Bills Outstanding",            # combined display name (covers payables too)
+            "Payables",                     # alternate internal name in some builds
+            "Outstanding Payables",         # older Tally/ERP9 name
+            "Outstandings",                 # catch-all fallback
+        ]
+    else:
+        _REPORT_ID_CANDIDATES = [
+            # User's saved F12 view with "Show Opening Amount" — try all likely name variants
+            "Bills Receivable - My View",       # dash with spaces
+            "Bills Receivable-My View",         # dash without spaces
+            "My View",                          # just the view name
+            "Bills Receivable : My View",       # colon separator
+            "Bills ReceivableBills Receivable - My View",  # TallyPrime breadcrumb-style name
+            # Standard report fallbacks (BILLOP absent without F12 view)
+            "Bills Receivable",                 # confirmed working ID (user-verified)
+            "Bills Outstanding",                # Tally UI display name
+            "Receivables",                      # alternate internal name in some builds
+            "Outstanding Receivables",          # older Tally/ERP9 name
+            "Outstandings",                     # catch-all fallback
+        ]
 
     def _build_xml(report_id: str) -> str:
         sv = f"        <SVTODATE>{to_date_8}</SVTODATE>\n"
@@ -4478,4 +5086,221 @@ def fetch_outstanding_receivables(
                 "due_date":    b["due_date"],
                 "opening":     b["opening"],
                 "outstanding": b["outstanding"],
-                "days_overdue":b["days_ov
+                "days_overdue":b["days_overdue"],
+            }
+            for b in bills if b["party"] == party
+        ]
+        p_outstanding = round(party_totals.get(party, sum(x["outstanding"] for x in party_bills)), 2)
+        p_opening     = round(party_opening.get(party, sum(x["opening"] for x in party_bills)), 2)
+        bills_by_party.append({
+            "party":       party,
+            "opening":     p_opening,
+            "outstanding": p_outstanding,
+            "bill_count":  len(party_bills),
+            "bills":       party_bills,
+        })
+
+    # Summary sorted highest outstanding first (for quick overview)
+    party_summary = [
+        {
+            "party":       p["party"],
+            "opening":     p["opening"],
+            "outstanding": p["outstanding"],
+            "bill_count":  p["bill_count"],
+        }
+        for p in sorted(bills_by_party, key=lambda x: -x["outstanding"])
+    ]
+
+    result: dict[str, Any] = {
+        "as_of_date":        to_date_8,
+        "from_date":         _parse_date(from_date) if from_date else "",
+        "total_opening":     total_opening,
+        "total_outstanding": total_outstanding,
+        "party_count":       len(bills_by_party),
+        "bill_count":        len(bills),
+        "party_summary":     party_summary,
+        "aging_summary":     {k: round(v, 2) for k, v in aging.items()},
+        "bills_by_party":    bills_by_party,
+        "tally_url":         _resolve_url(tally_url),
+    }
+
+    return result
+
+
+# Ageing buckets emitted by the MCP Group Ageing TDL report, mapped from the
+# TDL's BUCKET codes to display labels. Slab boundaries (days, by bill date):
+# 0-90 / 90-180 / 180-365 / 365-1035 / 1035+ , taken from the saved view's
+# Age From / Age To arrays. "On Account" is derived (closing - dated bills).
+_AGEING_BUCKET_MAP = [
+    ("B0_90",      "< 90 days"),
+    ("B90_180",    "90 to 180 days"),
+    ("B180_365",   "180 to 365 days"),
+    ("B365_1035",  "365 to 1035 days"),
+    ("B1035_PLUS", "> 1035 days"),
+]
+_AGEING_LABELS = [lbl for _, lbl in _AGEING_BUCKET_MAP] + ["On Account"]
+
+
+def _ageing_num(s: str) -> float:
+    """Parse a Tally display amount (with Indian commas) into a float."""
+    s = (s or "").strip().replace(",", "")
+    if not s:
+        return 0.0
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _ageing_signed(mag_text: str, isdr_text: str) -> float:
+    """Apply sign in the Group-Outstandings convention: Dr negative, Cr positive."""
+    mag = _ageing_num(mag_text)
+    return -mag if (isdr_text or "").strip().lower() == "yes" else mag
+
+
+def _ageing_for_period(
+    group_name: str,
+    from8: str,
+    to8: str,
+    report_id: str,
+    tally_url: str | None,
+) -> dict[str, Any]:
+    """Ageing for a single period (from8/to8 already YYYYMMDD or ''). Ages bills
+    as of to8 (the as-of date). Returns the per-period result or an error dict."""
+    date_vars = ""
+    if from8:
+        date_vars += f"        <SVFROMDATE>{from8}</SVFROMDATE>\n"
+    if to8:
+        date_vars += f"        <SVTODATE>{to8}</SVTODATE>\n"
+
+    xml = f"""<ENVELOPE>
+  <HEADER>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Data</TYPE>
+    <ID>{_xe(report_id)}</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+{date_vars}        <MCPGroup>{_xe(group_name)}</MCPGroup>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>
+    </DESC>
+  </BODY>
+</ENVELOPE>"""
+
+    raw = _post_xml(xml, tally_url, timeout=120.0)
+    if "Unknown Request" in raw or "Could not find Report" in raw:
+        return {
+            "error": f"The '{report_id}' TDL report is not loaded in TallyPrime. "
+                     "Load tdl/mcp_group_ageing.txt via F1 > TDL & Add-Ons "
+                     "(or restart Tally), then retry. "
+                     f"Tally said: {raw.strip()[:200]}",
+            "group": group_name,
+            "tally_url": _resolve_url(tally_url),
+        }
+
+    root = _parse_xml(raw)
+    label_for = {code: lbl for code, lbl in _AGEING_BUCKET_MAP}
+
+    # Sum signed bill amounts per (party, bucket); track each party's dated total.
+    day: dict[str, dict[str, float]] = {}
+    dated_sum: dict[str, float] = {}
+    for bill in root.findall(".//BILL"):
+        party = (bill.findtext("PARTY") or "").strip()
+        label = label_for.get((bill.findtext("BUCKET") or "").strip())
+        if not party or label is None:
+            continue   # ONACCOUNT-bucket bills excluded; On Account derived below
+        val = _ageing_signed(bill.findtext("AMT"), bill.findtext("BDP"))
+        day.setdefault(party, {})
+        day[party][label] = round(day[party].get(label, 0.0) + val, 2)
+        dated_sum[party] = round(dated_sum.get(party, 0.0) + val, 2)
+
+    # One row per ledger; total = closing, On Account = closing - dated bills.
+    parties: list[dict[str, Any]] = []
+    for led in root.findall(".//LEDGER"):
+        party = (led.findtext("LPARTY") or "").strip()
+        if not party:
+            continue
+        total = _ageing_signed(led.findtext("LCLOSING"), led.findtext("LDP"))
+        row: dict[str, Any] = {"party": party, "total": round(total, 2)}
+        for _, label in _AGEING_BUCKET_MAP:
+            row[label] = round(day.get(party, {}).get(label, 0.0), 2)
+        row["On Account"] = round(total - dated_sum.get(party, 0.0), 2)
+        parties.append(row)
+
+    parties.sort(key=lambda r: -abs(r["total"]))
+
+    ageing_totals = {
+        label: round(sum(r.get(label, 0.0) for r in parties), 2)
+        for label in _AGEING_LABELS
+    }
+    grand = round(sum(r["total"] for r in parties), 2)
+
+    return {
+        "group":             group_name,
+        "report_id":         report_id,
+        "from_date":         from8,
+        "to_date":           to8,
+        "buckets":           _AGEING_LABELS,
+        "party_count":       len(parties),
+        "total_outstanding": grand,
+        "ageing_totals":     ageing_totals,
+        "parties":           parties,
+    }
+
+
+def fetch_ageing_analysis(
+    group_name: str = "Sundry Debtors",
+    from_date: str = "",
+    to_date: str = "",
+    financial_years: list[str] | None = None,
+    report_id: str = "MCP Group Ageing",
+    tally_url: str | None = None,
+) -> dict[str, Any]:
+    """Bill-wise ageing analysis for a group, via the MCP Group Ageing TDL report.
+
+    The XML gateway cannot render Tally's age-wise Group Outstandings columns
+    (that layout is a saved report-view feature, not a gateway parameter). This
+    instead calls a custom TDL report (tdl/mcp_group_ageing.txt, loaded in Tally
+    via F1 > TDL & Add-Ons) that has Tally itself compute, per outstanding bill:
+    party, bill date, age in days (by bill date), ageing bucket (slabs
+    0-90/90-180/180-365/365-1035/1035+), the bill's outstanding amount and its
+    Dr/Cr flag; plus each ledger's net closing balance.
+
+    Amounts are summed per (party, bucket); each party's total comes from its
+    ledger closing, and On Account = closing - sum(dated bills). Output matches
+    Tally's own Group Outstandings ageing sign-for-sign. Works for any group, so
+    Sundry Creditors flips signs naturally (Cr positive).
+
+    - financial_years: list like ["2024-25", "2025-26"] for a single-click
+      multi-year fetch. Each year is aged AS OF its closing date (31-Mar).
+      Returns {"periods": [<one result per FY>, ...]}.
+    - Otherwise pass from_date/to_date for a single as-of period; omit both for
+      the current period.
+
+    Single-period result: group, report_id, from_date, to_date, buckets,
+    party_count, total_outstanding, ageing_totals and parties.
+    """
+    if financial_years:
+        periods = []
+        for fy in financial_years:
+            f8, t8 = _fy_to_period(str(fy))
+            res = _ageing_for_period(group_name, f8, t8, report_id, tally_url)
+            if res.get("error"):
+                return res   # e.g. TDL report not loaded — surface immediately
+            res = {"financial_year": str(fy), **res}
+            periods.append(res)
+        return {
+            "group":           group_name,
+            "report_id":       report_id,
+            "financial_years": [str(fy) for fy in financial_years],
+            "period_count":    len(periods),
+            "periods":         periods,
+        }
+
+    from8 = _parse_date(from_date) if from_date else ""
+    to8   = _parse_date(to_date) if to_date else ""
+    return _ageing_for_period(group_name, from8, to8, report_id, tally_url)
+# end of module

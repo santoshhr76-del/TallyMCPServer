@@ -1,0 +1,108 @@
+;;=========================================================================
+;; MCP Group Ageing  -  custom TDL report for TallyPrime XML gateway export
+;;
+;; Emits, for a given group (##MCPGroup):
+;;   <BILL>   one per DATED outstanding bill of every ledger under the group,
+;;            with party, bill date, age in days (by bill date), ageing bucket
+;;            (slabs 0-90 / 90-180 / 180-365 / 365-1035 / 1035+), and the bill's
+;;            outstanding amount ($ClosingBalance).
+;;   <LEDGER> one per ledger under the group, with its net closing balance.
+;;
+;; The MCP tool then:
+;;   - sums BILL.AMT per (party, bucket)            -> the day buckets
+;;   - On Account[party] = LEDGER.LCLOSING - sum(that party's dated bills)
+;;   - total[party]      = LEDGER.LCLOSING
+;;
+;; Request (gateway): <ID>MCP Group Ageing</ID> with <SVFROMDATE>/<SVTODATE>
+;; and <MCPGroup>Sundry Debtors</MCPGroup>.
+;;
+;; NOTE: reload the TDL in Tally (F1 -> TDL & Add-Ons, or restart) after edits.
+;;=========================================================================
+
+[Variable: MCPGroup]
+    Type    : String
+    Default : "Sundry Debtors"
+
+[Report: MCP Group Ageing]
+    Form     : MCP Group Ageing
+    Variable : MCPGroup
+
+[Form: MCP Group Ageing]
+    Parts  : MCP GA BillsPart, MCP GA LedPart
+    XMLTAG : "ENVELOPE"
+
+;; ---- dated bills ------------------------------------------------------
+[Part: MCP GA BillsPart]
+    Lines  : MCP GA Bill
+    Repeat : MCP GA Bill : MCP GA Bills
+    Scroll : Vertical
+
+[Line: MCP GA Bill]
+    Fields : MCP GA Party, MCP GA BDate, MCP GA Age, MCP GA Bucket, MCP GA Amt, MCP GA BDP
+    XMLTAG : "BILL"
+
+[Field: MCP GA Party]
+    Set as : $LedgerName
+    XMLTAG : "PARTY"
+
+[Field: MCP GA BDate]
+    Set as : $BillDate
+    XMLTAG : "BDATE"
+
+[Field: MCP GA Age]
+    Set as : ##SVTODATE - $BillDate
+    XMLTAG : "AGE"
+
+[Field: MCP GA Bucket]
+    Set as : if $$IsEmpty:$BillDate then "ONACCOUNT" else +
+             if (##SVTODATE - $BillDate) < 90   then "B0_90"     else +
+             if (##SVTODATE - $BillDate) < 180  then "B90_180"   else +
+             if (##SVTODATE - $BillDate) < 365  then "B180_365"  else +
+             if (##SVTODATE - $BillDate) < 1035 then "B365_1035" else "B1035_PLUS"
+    XMLTAG : "BUCKET"
+
+[Field: MCP GA Amt]
+    Set as : $ClosingBalance
+    XMLTAG : "AMT"
+
+[Field: MCP GA BDP]
+    Set as : $$IsDr:$ClosingBalance
+    XMLTAG : "BDP"
+
+[Collection: MCP GA Bills]
+    Type   : Bills
+    Filter : MCP GA InGroup
+
+;; ---- per-ledger closing balance (for On Account + total) --------------
+[Part: MCP GA LedPart]
+    Lines  : MCP GA Led
+    Repeat : MCP GA Led : MCP GA Ledgers
+    Scroll : Vertical
+
+[Line: MCP GA Led]
+    Fields : MCP GA LParty, MCP GA LClosing, MCP GA LSClosing, MCP GA LDP
+    XMLTAG : "LEDGER"
+
+[Field: MCP GA LParty]
+    Set as : $Name
+    XMLTAG : "LPARTY"
+
+[Field: MCP GA LClosing]
+    Set as : $ClosingBalance
+    XMLTAG : "LCLOSING"
+
+[Field: MCP GA LSClosing]
+    Set as : $$Number:$ClosingBalance
+    XMLTAG : "LSCLOSING"
+
+[Field: MCP GA LDP]
+    Set as : $$IsDr:$ClosingBalance
+    XMLTAG : "LDP"
+
+[Collection: MCP GA Ledgers]
+    Type   : Ledger
+    Filter : MCP GA LedInGroup
+
+[System: Formula]
+    MCP GA InGroup    : $$IsLedOfGrp:$LedgerName:##MCPGroup
+    MCP GA LedInGroup : $$IsLedOfGrp:$Name:##MCPGroup

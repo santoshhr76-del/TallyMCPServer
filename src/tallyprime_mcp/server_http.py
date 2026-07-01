@@ -86,8 +86,30 @@ class ApiKeyMiddleware:
         path = scope.get("path", "")
 
         # Public paths — no auth required
-        if path in ("/health", "/", "/app", "/install", "/install-qr.png", "/install-qr.svg"):
+        # /logo.* is in here so the PWA can fetch it for the invoice-PDF
+        # header without bundling the Bearer token into the image request.
+        if path in ("/health", "/", "/app", "/install",
+                    "/install-qr.png", "/install-qr.svg",
+                    "/logo.png", "/logo.jpg", "/logo.jpeg"):
             await self.app(scope, receive, send)
+            return
+
+        # /payments/stream is an EventSource (SSE) connection. The browser
+        # EventSource API cannot attach Authorization headers, so we accept
+        # the token via ?token=… on the query string instead.
+        if path == "/payments/stream":
+            qs = scope.get("query_string", b"").decode()
+            qtoken = ""
+            for kv in qs.split("&"):
+                if kv.startswith("token="):
+                    from urllib.parse import unquote
+                    qtoken = unquote(kv[6:])
+                    break
+            if qtoken == API_KEY:
+                await self.app(scope, receive, send)
+                return
+            response = JSONResponse({"error": "Unauthorized"}, status_code=401)
+            await response(scope, receive, send)
             return
 
         # Check Authorization header
@@ -164,6 +186,64 @@ TALLY_TOOLS = [
         },
     },
     {
+        "name": "get_ledgers_of_group",
+        "description": (
+            "List every ledger under a Tally group (e.g. 'Sundry Debtors' or 'Sundry Creditors') "
+            "with opening and closing balance, including ledgers under nested sub-groups. "
+            "Optional from_date/to_date set the period: closing_balance is as of to_date, "
+            "opening_balance as of from_date. Debit balances are negative, credit positive."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "group_name": {"type": "string", "description": "Tally group (e.g. 'Sundry Debtors', 'Sundry Creditors'). Default 'Sundry Debtors'."},
+                "from_date": {"type": "string", "description": "Optional period start (DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD)"},
+                "to_date":   {"type": "string", "description": "Optional period end / as-of date (DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "Sundry_Debtors_Sch-III",
+        "description": (
+            "Bill-wise ageing analysis of Sundry Debtors (receivables) via the custom 'MCP Group "
+            "Ageing' TDL report - Tally computes the ageing, matching the Group Outstandings "
+            "age-wise export. Requires tdl/mcp_group_ageing.txt loaded in Tally (F1 > TDL & "
+            "Add-Ons). Buckets: < 90 days / 90 to 180 days / 180 to 365 days / 365 to 1035 days / "
+            "> 1035 days / On Account, aged by bill date. Debtor amounts negative, credit positive. "
+            "Pass financial_years for a single-click multi-year fetch (aged as of each 31-Mar)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "financial_years": {"type": "array", "items": {"type": "string"}, "description": "One or more FYs, e.g. ['2024-25','2025-26']. Returns ageing per year (as of each 31-Mar). Overrides from_date/to_date."},
+                "from_date": {"type": "string", "description": "Optional period start (DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD)."},
+                "to_date": {"type": "string", "description": "Optional period end / as-of date (DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD)."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "Sundry_Creditors_Sch-III",
+        "description": (
+            "Bill-wise ageing analysis of Sundry Creditors (payables) via the custom 'MCP Group "
+            "Ageing' TDL report - Tally computes the ageing, matching the Group Outstandings "
+            "age-wise export. Requires tdl/mcp_group_ageing.txt loaded in Tally (F1 > TDL & "
+            "Add-Ons). Buckets: < 90 days / 90 to 180 days / 180 to 365 days / 365 to 1035 days / "
+            "> 1035 days / On Account, aged by bill date. Credit amounts positive, debit negative. "
+            "Pass financial_years for a single-click multi-year fetch (aged as of each 31-Mar)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "financial_years": {"type": "array", "items": {"type": "string"}, "description": "One or more FYs, e.g. ['2024-25','2025-26']. Returns ageing per year (as of each 31-Mar). Overrides from_date/to_date."},
+                "from_date": {"type": "string", "description": "Optional period start (DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD)."},
+                "to_date": {"type": "string", "description": "Optional period end / as-of date (DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD or YYYYMMDD)."},
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "get_vouchers",
         "description": "Fetch vouchers (Sales, Purchase, Payment, Receipt, Journal) with optional date range and party filter.",
         "input_schema": {
@@ -178,15 +258,45 @@ TALLY_TOOLS = [
         },
     },
     {
-        "name": "get_trial_balance",
-        "description": "Get trial balance for a date range showing debit/credit totals for every ledger.",
+        "name": "get_voucher_by_number",
+        "description": (
+            "Fetch a COMPLETE TallyPrime voucher by its voucher number (single parameter). "
+            "Returns the full voucher breakdown. After calling, summarise: party details "
+            "(name, GSTIN, state, place of supply), all ledger entries (name + amount + Dr/Cr), "
+            "and all inventory items (item, quantity, rate, amount), then the totals."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
+                "voucher_number": {"type": "string", "description": "The exact voucher/invoice number as it appears in TallyPrime"},
+            },
+            "required": ["voucher_number"],
+        },
+    },
+    {
+        "name": "get_trial_balance",
+        "description": "Get trial balance for a date range showing debit/credit totals for every ledger. Pass financial_years for a single-click multi-year fetch (one trial balance per year under 'periods').",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "financial_years": {"type": "array", "items": {"type": "string"}, "description": "One or more FYs, e.g. ['2024-25','2025-26']. Returns a trial balance per year. Overrides from_date/to_date."},
                 "from_date": {"type": "string", "description": "Start date YYYYMMDD"},
                 "to_date":   {"type": "string", "description": "End date YYYYMMDD"},
             },
-            "required": ["from_date", "to_date"],
+            "required": [],
+        },
+    },
+    {
+        "name": "trial_balance_Sch-III",
+        "description": "Get trial balance for a date range showing debit/credit totals for every ledger. Pass financial_years for a single-click multi-year fetch (one trial balance per year under 'periods').",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "financial_years": {"type": "array", "items": {"type": "string"}, "description": "One or more FYs, e.g. ['2024-25','2025-26']. Returns a trial balance per year. Overrides from_date/to_date."},
+                "from_date": {"type": "string", "description": "Start date YYYYMMDD"},
+                "to_date":   {"type": "string", "description": "End date YYYYMMDD"},
+            },
+            "required": [],
         },
     },
     {
@@ -508,6 +618,23 @@ Guidelines:
 - Keep responses concise and mobile-friendly — avoid very long tables; summarise where possible
 - For reports (trial balance, balance sheet etc.), highlight key figures: total assets, net profit, top debtors
 - For outstanding receivables, highlight overdue amounts and top parties
+- For the active company / company details response, DO NOT use a Markdown
+  table at all. Render each field as a single plain line:
+      • Emoji-keyed fields (📱 ☎️ ✉️ 🌐 🗺️ 🌍 💰) → `{emoji} {value}` only.
+        No text label, no pipe characters.
+      • Text-keyed fields (Company Name, Financial Year, GSTIN, Tax Unit,
+        Books From, etc.) → `**{Label}:** {value}` on its own line.
+  Never emit the `| Field | Details |` / `|---|---|` table header rows.
+  Examples (one line each):
+      **Company Name:** Surabhi Traders
+      **GSTIN:** 08AHPPD6855J1ZT
+      📱 9887883404
+      ✉️ santoshhr76@gmail.com
+  If a field's value is missing or empty in the tool result, OMIT that line
+  entirely — do not render `📱 ?`, `💰 -`, or any placeholder.
+  Don't invent values that the tool didn't return, but light cosmetic
+  formatting (e.g. adding the ₹ symbol next to INR, or " days" after a
+  numeric credit period) is fine.
 
 Before creating any voucher (sales, payment, receipt):
 1. Summarise exactly what will be posted: date, party, amount, ledgers
@@ -533,6 +660,32 @@ def execute_tally_tool(name: str, args: dict[str, Any]) -> Any:
         elif name == "get_ledger":
             return tc.fetch_ledger(args["name"], tally_url=tally_url)
 
+        elif name == "get_ledgers_of_group":
+            return tc.fetch_ledgers_of_group(
+                group_name=args.get("group_name", "Sundry Debtors"),
+                from_date=args.get("from_date", ""),
+                to_date=args.get("to_date", ""),
+                tally_url=tally_url,
+            )
+
+        elif name == "Sundry_Debtors_Sch-III":
+            return tc.fetch_ageing_analysis(
+                group_name="Sundry Debtors",
+                from_date=args.get("from_date", ""),
+                to_date=args.get("to_date", ""),
+                financial_years=args.get("financial_years") or None,
+                tally_url=tally_url,
+            )
+
+        elif name == "Sundry_Creditors_Sch-III":
+            return tc.fetch_ageing_analysis(
+                group_name="Sundry Creditors",
+                from_date=args.get("from_date", ""),
+                to_date=args.get("to_date", ""),
+                financial_years=args.get("financial_years") or None,
+                tally_url=tally_url,
+            )
+
         elif name == "get_vouchers":
             return tc.fetch_vouchers(
                 voucher_type=args.get("voucher_type", ""),
@@ -542,10 +695,17 @@ def execute_tally_tool(name: str, args: dict[str, Any]) -> Any:
                 tally_url=tally_url,
             )
 
-        elif name == "get_trial_balance":
+        elif name == "get_voucher_by_number":
+            return tc.fetch_voucher_by_number(
+                voucher_number=args["voucher_number"],
+                tally_url=tally_url,
+            )
+
+        elif name in ("get_trial_balance", "trial_balance_Sch-III"):
             return tc.fetch_trial_balance(
                 from_date=args.get("from_date", ""),
                 to_date=args.get("to_date", ""),
+                financial_years=args.get("financial_years") or None,
                 tally_url=tally_url,
             )
 
@@ -746,6 +906,67 @@ def _serialize_content(content: list) -> list:
     return result
 
 
+# Fields that are useful for direct API consumers / debugging but should
+# NOT appear in chat-formatted answers from Claude. Recursively stripped
+# from tool results before they're handed back to the model.
+_HIDDEN_TOOL_FIELDS = frozenset({
+    "tally_url",     # internal gateway URL — user already knows where Tally is
+    "raw_response",  # raw Tally XML — too noisy for chat
+    "raw_xml",
+    "raw_status",
+})
+
+
+def _hide_internal_fields(obj):
+    """Return a copy of obj with hidden internal fields stripped (recursively)."""
+    if isinstance(obj, dict):
+        return {k: _hide_internal_fields(v)
+                for k, v in obj.items()
+                if k not in _HIDDEN_TOOL_FIELDS}
+    if isinstance(obj, list):
+        return [_hide_internal_fields(v) for v in obj]
+    return obj
+
+
+# Cosmetic key relabel for chat output. When Claude renders the tool result
+# as a Markdown table the dict key becomes the row label, so renaming the
+# key effectively renames the label. Applied universally — wherever these
+# fields appear (active company, party ledger contacts, …) the icon shows
+# instead of the plain word.
+_CHAT_KEY_ICONS = {
+    "mobile":   "📱",
+    "phone":    "☎️",
+    "email":    "✉️",
+    "website":  "🌐",
+    "state":    "🗺️",
+    "country":  "🌍",
+    "currency": "💰",
+}
+
+
+def _chat_relabel_fields(obj):
+    """Replace specific keys with icon-only labels (recursively).
+
+    If a key gets renamed to an emoji and its value is empty/None, the
+    pair is dropped entirely — otherwise Claude tends to render the row
+    as "📱 ?" or "💰 -" when it has nothing meaningful to display.
+    """
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            new_k = _CHAT_KEY_ICONS.get(k.lower(), k)
+            new_v = _chat_relabel_fields(v)
+            # Drop emoji-relabelled rows whose value is empty.
+            if new_k != k:
+                if new_v is None: continue
+                if isinstance(new_v, str) and not new_v.strip(): continue
+            out[new_k] = new_v
+        return out
+    if isinstance(obj, list):
+        return [_chat_relabel_fields(v) for v in obj]
+    return obj
+
+
 async def handle_chat(request: Request):
     """AI chat endpoint — runs the Claude + TallyPrime agentic loop."""
     try:
@@ -807,6 +1028,12 @@ async def handle_chat(request: Request):
                         None, execute_tally_tool, tool_name, dict(block.input)
                     )
 
+                    # Hide internal/diagnostic fields from chat so Claude
+                    # doesn't surface them in user-facing answers.
+                    result = _hide_internal_fields(result)
+                    # Cosmetic relabel: mobile/email/website → 📱 / ✉️ / 🌐
+                    result = _chat_relabel_fields(result)
+
                     # Truncate very large results to keep context manageable
                     result_str = json.dumps(result, ensure_ascii=False)
                     if len(result_str) > 8000:
@@ -860,6 +1087,22 @@ async def handle_install_qr_png(request: Request):
     if not img.exists():
         return JSONResponse({"error": "install-qr.png not found"}, status_code=404)
     return Response(img.read_bytes(), media_type="image/png")
+
+
+async def handle_logo(request: Request):
+    """Serve the company logo (embedded by the PWA in invoice PDFs).
+
+    Tries logo.png, then logo.jpg, then logo.jpeg in pwa/.
+    """
+    pwa_dir = Path(__file__).parent.parent.parent / "pwa"
+    for fname, mime in [("logo.png",  "image/png"),
+                        ("logo.jpg",  "image/jpeg"),
+                        ("logo.jpeg", "image/jpeg")]:
+        img = pwa_dir / fname
+        if img.exists():
+            return Response(img.read_bytes(), media_type=mime,
+                            headers={"Cache-Control": "public, max-age=3600"})
+    return JSONResponse({"error": "logo file not found in pwa/"}, status_code=404)
 
 
 async def handle_install_qr_svg(request: Request):
@@ -975,15 +1218,89 @@ async def handle_einvoice_generate(request: Request):
         except Exception as e:
             return JSONResponse({"error": f"Could not build IRN payload: {e}"}, status_code=400)
 
+    # ── DEBUG: did the EwbDtls block actually make it into the payload? ──
+    ewb_in_payload = bool(payload.get("EwbDtls"))
+    if ewb_in_payload:
+        ewb_d = payload["EwbDtls"]
+        # Dump the full EwbDtls block as JSON so it's directly comparable
+        # to NIC's reference shape. Bare key=value tuples hid the type of
+        # each field (was Distance an int or a str? was VehNo upper-case?).
+        logger.info("EwbDtls SENT to NIC:\n%s",
+                    json.dumps(ewb_d, indent=2, ensure_ascii=False, default=str))
+        # And the invoice-side context — EWB validation depends on the
+        # invoice's total value, supply type, and seller/buyer states.
+        try:
+            val   = payload.get("ValDtls") or {}
+            doc   = payload.get("DocDtls") or {}
+            tran  = payload.get("TranDtls") or {}
+            sell  = payload.get("SellerDtls") or {}
+            buyer = payload.get("BuyerDtls") or {}
+            disp  = payload.get("DispDtls") or {}
+            ship  = payload.get("ShipDtls") or {}
+            logger.info(
+                "  Invoice context: doc=%s/%s  total=%s  SupTyp=%s  "
+                "seller_stcd=%s/Pin=%s -> buyer_pos=%s/Stcd=%s/Pin=%s  items=%d  "
+                "DispDtls=%s  ShipDtls=%s  Gstin_seller=%s  Gstin_buyer=%s",
+                doc.get("Typ"), doc.get("No"),
+                val.get("TotInvVal"),
+                tran.get("SupTyp"),
+                sell.get("Stcd"), sell.get("Pin"),
+                buyer.get("Pos"), buyer.get("Stcd"), buyer.get("Pin"),
+                len(payload.get("ItemList") or []),
+                "yes" if disp else "no",
+                "yes" if ship else "no",
+                sell.get("Gstin"), buyer.get("Gstin"),
+            )
+        except Exception:
+            pass
+    else:
+        # Tell the user what's missing — most common cause is "I didn't fill the
+        # transport card in the PWA". We deliberately omit EwbDtls when all
+        # three transport inputs are blank.
+        ewb_raw = (form.get("ewb") if isinstance(form, dict) else None) or {}
+        logger.info(
+            "No EwbDtls — transport fields empty in form.ewb (got %r). "
+            "Fill Trans Doc No / Date / Vehicle No in the e-Inv 'Transport' "
+            "card to request an e-Way Bill alongside the IRN.",
+            {k: ewb_raw.get(k) for k in
+             ("trans_doc_no", "trans_doc_dt", "veh_no")} if ewb_raw else ewb_raw,
+        )
+
     client = get_einv_client()
     try:
         response = await client.generate_irn(payload)
     except EInvoiceConfigError as e:
+        logger.error("NIC IRP config error: %s", e.to_dict())
         return JSONResponse(e.to_dict(), status_code=500)
     except EInvoiceAuthError as e:
+        logger.error("NIC IRP auth error: %s", e.to_dict())
         return JSONResponse(e.to_dict(), status_code=502)
     except EInvoiceError as e:
-        return JSONResponse(e.to_dict(), status_code=502)
+        # NIC HTTP 200 + body-level error → mapped to 502 by us. The new
+        # _parse_nic_errors helper means e.body already includes the
+        # decoded ErrorDetails / InfoDtls — log them concisely.
+        details = e.to_dict()
+        parsed_errors = (details.get("body") or {}).get("_parsed_errors") or []
+        parsed_infos  = (details.get("body") or {}).get("_parsed_infos")  or []
+        try:
+            doc_no = ((payload.get("DocDtls") or {}).get("No")) or "?"
+            doc_dt = ((payload.get("DocDtls") or {}).get("Dt")) or "?"
+        except Exception:
+            doc_no = doc_dt = "?"
+        # One concise WARNING line per error code — much easier to scan
+        # than the full envelope JSON.
+        logger.warning("NIC IRP rejected doc %s (%s): %s", doc_no, doc_dt, str(e))
+        for er in parsed_errors:
+            if isinstance(er, dict):
+                logger.warning("  ErrorCode=%s  ErrorMessage=%s",
+                               er.get("ErrorCode") or er.get("error_code"),
+                               er.get("ErrorMessage") or er.get("error_message"))
+        for inf in parsed_infos:
+            if isinstance(inf, dict):
+                logger.info("  InfoDtl  InfCd=%s  Desc=%s",
+                            inf.get("InfCd") or inf.get("inf_cd"),
+                            inf.get("Desc")  or inf.get("description"))
+        return JSONResponse(details, status_code=502)
 
     # NIC IRP client returns {"data": <decoded payload>, "raw": <full envelope>}.
     # The payload itself can be flat or nested under another "Data"/"data" key.
@@ -1013,6 +1330,86 @@ async def handle_einvoice_generate(request: Request):
         except Exception as e:
             logger.warning("QR render failed: %s", e)
 
+    # ── UPI payment QR ─────────────────────────────────────────────────────
+    # Build a deeplink-style upi:// URL and render it as a QR PNG so the
+    # invoice PDF can show a "Pay via UPI" card scannable by any UPI app
+    # (Google Pay, PhonePe, Paytm, BHIM, …). Requires UPI_VPA in .env;
+    # without it the upi_* fields are returned blank and the PDF skips
+    # the section gracefully.
+    upi_vpa  = (os.environ.get("UPI_VPA")  or "").strip()
+    upi_name = (os.environ.get("UPI_PAYEE_NAME")
+                or os.environ.get("GMAIL_SENDER")
+                or "Surabhi Enterprises").strip()
+    # Compute invoice total. Prefer the NIC ValDtls.TotInvVal if we have it
+    # (works for both flat-form and pre-built NIC payloads), else sum items.
+    upi_amount = 0.0
+    try:
+        val = (payload.get("ValDtls") or {})
+        if "TotInvVal" in val:
+            upi_amount = float(val.get("TotInvVal") or 0)
+        else:
+            # Sum from items: (qty*rate - disc) + GST + cess
+            for it in (payload.get("ItemList") or []):
+                upi_amount += float(it.get("TotItemVal") or 0)
+    except Exception:
+        pass
+
+    doc_no = ""
+    try:
+        doc_no = str(((payload.get("DocDtls") or {}).get("No")) or "").strip()
+    except Exception:
+        pass
+
+    upi_url = ""
+    upi_qr_b64 = ""
+    if upi_vpa:
+        from urllib.parse import quote
+        params = [f"pa={quote(upi_vpa)}", f"pn={quote(upi_name)}"]
+        if upi_amount and upi_amount > 0:
+            params.append(f"am={upi_amount:.2f}")
+        if doc_no:
+            params.append(f"tn={quote('Invoice ' + doc_no)}")
+        params.append("cu=INR")
+        upi_url = "upi://pay?" + "&".join(params)
+        try:
+            import io, base64
+            import qrcode
+            qr2 = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,
+                                box_size=10, border=2)
+            qr2.add_data(upi_url)
+            qr2.make(fit=True)
+            img2 = qr2.make_image(fill_color="#16203A", back_color="white")
+            buf2 = io.BytesIO()
+            img2.save(buf2, format="PNG")
+            upi_qr_b64 = base64.b64encode(buf2.getvalue()).decode("ascii")
+        except Exception as e:
+            logger.warning("UPI QR render failed: %s", e)
+
+    # ── DEBUG: did NIC return e-Way Bill fields in the response? ──
+    ewb_no_raw     = irn_data.get("EwbNo")        or irn_data.get("ewb_no")
+    ewb_dt_raw     = irn_data.get("EwbDt")        or irn_data.get("ewb_dt")
+    ewb_valid_raw  = irn_data.get("EwbValidTill") or irn_data.get("ewb_valid_till")
+    if ewb_no_raw:
+        logger.info("EWB received from NIC: EwbNo=%s EwbDt=%s ValidTill=%s",
+                    ewb_no_raw, ewb_dt_raw, ewb_valid_raw)
+    elif ewb_in_payload:
+        # We sent EwbDtls but NIC didn't return EwbNo. The explanation
+        # almost always lives in `Remarks` — NIC silently skips EWB when
+        # the invoice is below the threshold (₹50,000) or the supplied
+        # transport details are unusable, and uses Remarks to say why.
+        ewb_diag = {k: v for k, v in irn_data.items() if "ewb" in k.lower()}
+        logger.warning(
+            "EwbDtls was sent but NIC did NOT return EwbNo.\n"
+            "  Status   : %r\n"
+            "  Remarks  : %r\n"
+            "  EWB keys : %s\n"
+            "  All keys : %s",
+            irn_data.get("Status"),
+            irn_data.get("Remarks"),
+            ewb_diag,
+            sorted(irn_data.keys()),
+        )
+
     return JSONResponse({
         "ok":      True,
         "irn":     irn_value,
@@ -1022,9 +1419,15 @@ async def handle_einvoice_generate(request: Request):
         "signed_invoice": irn_data.get("SignedInvoice") or irn_data.get("signed_invoice"),
         "qr_png_b64":     qr_png_b64,
         # E-Way Bill fields — populated only when EwbDtls was supplied.
-        "ewb_no":         irn_data.get("EwbNo")        or irn_data.get("ewb_no"),
-        "ewb_dt":         irn_data.get("EwbDt")        or irn_data.get("ewb_dt"),
-        "ewb_valid_till": irn_data.get("EwbValidTill") or irn_data.get("ewb_valid_till"),
+        "ewb_no":         ewb_no_raw,
+        "ewb_dt":         ewb_dt_raw,
+        "ewb_valid_till": ewb_valid_raw,
+        # UPI payment QR — for the "Pay via UPI" card in the invoice PDF.
+        "upi_url":        upi_url,
+        "upi_qr_b64":     upi_qr_b64,
+        "upi_amount":     round(upi_amount, 2),
+        "upi_vpa":        upi_vpa,
+        "upi_payee":      upi_name if upi_vpa else "",
         "raw":     response,
     })
 
@@ -1438,6 +1841,196 @@ async def handle_ledger_create(request: Request):
     return JSONResponse({"ok": True, **(result if isinstance(result, dict) else {"raw": result})})
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Payments — Gmail-based credit poller, auto-receipt to Tally
+# ─────────────────────────────────────────────────────────────────────
+
+async def handle_payments_recent(request: Request):
+    """List the most recent credit-notification events.
+
+    Query: ?limit=50 (default 50, capped at 200)
+    """
+    from . import gmail_payments as gp
+    try:
+        limit = int(request.query_params.get("limit", "50"))
+    except ValueError:
+        limit = 50
+    limit = max(1, min(limit, 200))
+    return JSONResponse({"ok": True, "events": gp.get_events(limit)})
+
+
+async def handle_payments_stream(request: Request):
+    """SSE stream — pushes credit events to the PWA in real time.
+
+    The PWA opens this on load and keeps it open; each new credit event
+    arrives as a 'data: {json}\\n\\n' chunk.
+    """
+    from starlette.responses import StreamingResponse
+    from . import gmail_payments as gp
+
+    async def event_generator():
+        q = gp.subscribe()
+        # Comment line keeps the connection open behind proxies.
+        yield ":ok\n\n"
+        try:
+            while True:
+                try:
+                    payload = await asyncio.wait_for(q.get(), timeout=25.0)
+                    yield f"event: payment\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ":keepalive\n\n"   # heartbeat
+                except asyncio.CancelledError:
+                    break
+        finally:
+            gp.unsubscribe(q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+async def handle_payments_match(request: Request):
+    """Manually attach a credit to a party + bill, posting the receipt voucher.
+
+    Path: /payments/{id}/match    Body: {party, bill_ref}
+    """
+    from . import gmail_payments as gp
+    ev_id = request.path_params["id"]
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+    party    = (body.get("party") or "").strip()
+    bill_ref = (body.get("bill_ref") or "").strip()
+    if not party:
+        return JSONResponse({"error": "party is required"}, status_code=400)
+    ev = await gp.manual_match(ev_id, party, bill_ref)
+    if ev is None:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    from dataclasses import asdict
+    return JSONResponse({"ok": ev.status == "posted", "event": asdict(ev)})
+
+
+async def handle_payments_retry(request: Request):
+    """Retry posting a previously-failed credit using the same party/bill."""
+    from . import gmail_payments as gp
+    ev_id = request.path_params["id"]
+    ev = await gp.retry_post(ev_id)
+    if ev is None:
+        return JSONResponse({"error": "Event not found or never matched"}, status_code=404)
+    from dataclasses import asdict
+    return JSONResponse({"ok": ev.status == "posted", "event": asdict(ev)})
+
+
+async def handle_email_send(request: Request):
+    """Send an email via Gmail SMTP with an optional PDF attachment.
+
+    Body:
+        to              : recipient email (required)
+        subject         : email subject (default "Invoice")
+        body            : plain-text body (default "Please find the attached invoice.")
+        attachment_b64  : base64-encoded PDF bytes (optional)
+        attachment_name : filename for the attachment (default "invoice.pdf")
+        cc              : comma-separated CC addresses (optional)
+        bcc             : comma-separated BCC addresses (optional)
+
+    Requires GMAIL_USER and GMAIL_APP_PASSWORD env vars. GMAIL_APP_PASSWORD
+    is a 16-character app-specific password generated at
+    https://myaccount.google.com/apppasswords (NOT your normal Gmail
+    password — that won't work for SMTP since Google deprecated it).
+    """
+    import base64
+    import smtplib
+    import ssl
+    from email.message import EmailMessage
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    to       = (body.get("to")       or "").strip()
+    subject  = (body.get("subject")  or "Invoice").strip()
+    msg_body = (body.get("body")     or "Please find the attached invoice.").strip()
+    cc       = (body.get("cc")       or "").strip()
+    bcc      = (body.get("bcc")      or "").strip()
+    attach_b64  = body.get("attachment_b64")  or ""
+    attach_name = body.get("attachment_name") or "invoice.pdf"
+
+    if not to:
+        return JSONResponse({"error": "Recipient (to) is required"}, status_code=400)
+
+    # Match the existing .env.example convention (GMAIL_SENDER); GMAIL_USER
+    # is accepted as a back-compat alias if someone has it instead.
+    gmail_user = ((os.environ.get("GMAIL_SENDER")
+                   or os.environ.get("GMAIL_USER")
+                   or "")).strip()
+    # The 16-char Gmail app password may be displayed by Google with spaces
+    # (e.g. "abcd efgh ijkl mnop") — strip them transparently.
+    gmail_pwd  = (os.environ.get("GMAIL_APP_PASSWORD") or "").replace(" ", "").strip()
+
+    if not gmail_user or not gmail_pwd:
+        return JSONResponse({
+            "error": "Gmail SMTP not configured. Set GMAIL_SENDER and GMAIL_APP_PASSWORD in .env. "
+                     "Get the 16-char app password from https://myaccount.google.com/apppasswords "
+                     "(requires 2-Step Verification enabled on the Gmail account).",
+            "stage": "config",
+        }, status_code=500)
+
+    # Build the message
+    em = EmailMessage()
+    em["From"]    = gmail_user
+    em["To"]      = to
+    em["Subject"] = subject
+    if cc:  em["Cc"]  = cc
+    if bcc: em["Bcc"] = bcc
+    em.set_content(msg_body)
+
+    if attach_b64:
+        try:
+            pdf_bytes = base64.b64decode(attach_b64)
+            em.add_attachment(
+                pdf_bytes,
+                maintype="application",
+                subtype="pdf",
+                filename=attach_name,
+            )
+        except Exception as e:
+            logger.warning("PDF attachment decode failed: %s", e)
+            return JSONResponse(
+                {"error": f"Could not decode attachment_b64: {e}"},
+                status_code=400,
+            )
+
+    # Send via Gmail SMTP over implicit TLS (port 465)
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx, timeout=30) as smtp:
+            smtp.login(gmail_user, gmail_pwd)
+            smtp.send_message(em)
+    except smtplib.SMTPAuthenticationError:
+        return JSONResponse({
+            "error": "Gmail authentication failed. Make sure GMAIL_APP_PASSWORD is the "
+                     "16-character app password (NOT your regular Gmail password) and that "
+                     "2-Step Verification is enabled on the account.",
+            "stage": "auth",
+        }, status_code=401)
+    except Exception as e:
+        logger.exception("Email send failed")
+        return JSONResponse(
+            {"error": f"Email send failed: {e}", "stage": "smtp"},
+            status_code=502,
+        )
+
+    return JSONResponse({"ok": True, "to": to, "from": gmail_user, "subject": subject})
+
+
 async def handle_einvoice_pdf(request: Request):
     """Render a printable HTML invoice with IRN + QR. Browser → Print → Save as PDF.
 
@@ -1635,13 +2228,42 @@ async def handle_einvoice_pdf(request: Request):
 # Starlette app
 # ─────────────────────────────────────────────────────────────────
 
+async def _on_startup():
+    """Boot background tasks. Currently: Gmail payments poller."""
+    try:
+        from . import gmail_payments as gp
+        await gp.start_poller()
+        logger.info("Background poller(s) launched")
+    except Exception as e:
+        logger.exception("Startup hook failed: %s", e)
+
+
+async def _on_shutdown():
+    try:
+        from . import gmail_payments as gp
+        await gp.stop_poller()
+    except Exception:
+        pass
+
+
+async def handle_payments_poller_status(request: Request):
+    """Diagnostic — confirm the poller is alive and how often it's ticking."""
+    from . import gmail_payments as gp
+    return JSONResponse(gp.status())
+
+
 starlette_app = Starlette(
+    on_startup=[_on_startup],
+    on_shutdown=[_on_shutdown],
     routes=[
         Route("/health",             health,                  methods=["GET"]),
         Route("/app",                handle_app,              methods=["GET"]),
         Route("/install",            handle_install,          methods=["GET"]),
         Route("/install-qr.png",     handle_install_qr_png,   methods=["GET"]),
         Route("/install-qr.svg",     handle_install_qr_svg,   methods=["GET"]),
+        Route("/logo.png",           handle_logo,             methods=["GET"]),
+        Route("/logo.jpg",           handle_logo,             methods=["GET"]),
+        Route("/logo.jpeg",          handle_logo,             methods=["GET"]),
         Route("/chat",               handle_chat,             methods=["POST"]),
         Route("/transcribe",         handle_transcribe,       methods=["POST"]),
         Route("/einvoice/generate",        handle_einvoice_generate,     methods=["POST"]),
@@ -1649,6 +2271,12 @@ starlette_app = Starlette(
         Route("/einvoice/pdf",             handle_einvoice_pdf,          methods=["POST"]),
         Route("/voucher/sales/from-einvoice", handle_voucher_from_einvoice, methods=["POST"]),
         Route("/ledger/create",            handle_ledger_create,          methods=["POST"]),
+        Route("/email/send",               handle_email_send,             methods=["POST"]),
+        Route("/payments/recent",          handle_payments_recent,        methods=["GET"]),
+        Route("/payments/stream",          handle_payments_stream,        methods=["GET"]),
+        Route("/payments/poller-status",   handle_payments_poller_status, methods=["GET"]),
+        Route("/payments/{id}/match",      handle_payments_match,         methods=["POST"]),
+        Route("/payments/{id}/retry",      handle_payments_retry,         methods=["POST"]),
         Mount("/sse/messages", app=sse_transport.handle_post_message),
         Mount("/sse",          app=handle_sse),
         Mount("/messages",     app=sse_transport.handle_post_message),
@@ -1669,4 +2297,5 @@ def run():
     uvicorn.run(asgi_app, host=HOST, port=PORT)
 
 
-if __name__
+if __name__ == "__main__":
+    run()
